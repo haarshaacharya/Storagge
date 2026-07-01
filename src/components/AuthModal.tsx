@@ -674,7 +674,7 @@ export default function AuthModal({ onClose, onAuthSuccess, onAdminLogin }: Auth
                     type="email"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
-                    placeholder="admin@aihub.com"
+                    placeholder="Admin Email"
                     className={inputClass}
                     onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
                   />
@@ -688,7 +688,7 @@ export default function AuthModal({ onClose, onAuthSuccess, onAdminLogin }: Auth
                     type={showPassword ? 'text' : 'password'}
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
-                    placeholder="••••••••"
+                    placeholder="Admin Password"
                     className={inputClass}
                     onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
                   />
