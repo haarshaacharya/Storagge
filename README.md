@@ -1,6 +1,14 @@
-# 🚀 Storagge
+<p align="center">
+  <img src="S.png" alt="Storagge Logo" width="80">
+</p>
 
+<h1 align="center">Storagge</h1>
+
+<p align="center">
 A modern AI Tools Directory built to discover, organize, and access the best AI tools from one place.
+</p>
+
+---
 
 ## ✨ Features
 
@@ -10,7 +18,7 @@ A modern AI Tools Directory built to discover, organize, and access the best AI 
 - 👤 User Authentication
 - 🛡️ Secure Admin Panel
 - ➕ Add/Delete AI Tools
-- 🗂️ Add/Delete Categories
+- 📁 Add/Delete Categories
 - 📊 Dashboard Analytics
 - 👥 User Management
 - 📈 Tool Usage Tracking
@@ -44,18 +52,9 @@ npm run dev
 npm run build
 ```
 
-## 🔑 Environment Variables
-
-Create a `.env` file:
-
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
 ## 📂 Project Structure
 
-```
+```text
 src/
 ├── components/
 ├── lib/
@@ -66,9 +65,9 @@ src/
 └── main.tsx
 ```
 
-## 🌐 Deployment
+## 🌐 Live Demo
 
-Deployed on **Vercel**.
+Deployed on Vercel.
 
 ## 📄 License
 
@@ -76,6 +75,7 @@ MIT License
 
 ---
 
-# 👨‍💻 Developer
+# 👨‍💻 Developer & FOUNDER
 
 ### Haarsh Aacharya
+
