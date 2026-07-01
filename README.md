@@ -1,9 +1,6 @@
 <p align="center">
-  <img src="S.png" alt="Storagge Logo" width="80">
+  <img src="./public/drstoragge.png" alt="Storagge Logo" width="220">
 </p>
-
-<h1 align="center">Storagge</h1>
-
 <p align="center">
 A modern AI Tools Directory built to discover, organize, and access the best AI tools from one place.
 </p>
