@@ -57,6 +57,10 @@ function App() {
       supabase.from('quick_urls').select('*').order('created_at', { ascending: false }),
     ]);
 
+    console.log("Categories:", catRes.data, catRes.error);
+    console.log("AI Tools:", toolsRes.data, toolsRes.error);
+    console.log("Quick URLs:", urlsRes.data, urlsRes.error);
+
     if (catRes.data) setCategories(catRes.data);
     if (toolsRes.data) setAiTools(toolsRes.data);
     if (urlsRes.data) setQuickUrls(urlsRes.data);
@@ -253,7 +257,7 @@ function App() {
                         : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                     }`}
                   >
-                    <CategoryIcon iconName={cat.icon} />
+                    {cat.icon !== "" && <CategoryIcon iconName={cat.icon} />}
                     <span className="text-sm font-medium">{cat.name}</span>
                   </button>
                 ))}

@@ -147,7 +147,7 @@ export default function AdminPanel({ onClose, categories, aiTools, onDataChange 
       icon: newCategory.icon,
       sort_order: maxOrder + 1,
     });
-    setNewCategory({ name: '', icon: 'Folder' });
+    setNewCategory({ name: '', icon: '' });
     setShowAddCategoryModal(false);
     onDataChange();
   };
@@ -557,6 +557,7 @@ export default function AdminPanel({ onClose, categories, aiTools, onDataChange 
                   onChange={(e) => setNewCategory({ ...newCategory, icon: e.target.value })}
                   className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
+                  <option value="">No Icon</option>
                   <option value="Folder">Folder</option>
                   <option value="Code">Code</option>
                   <option value="Music">Music</option>
