@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import type { Category, AITool, QuickUrl, Profile } from './types/database';
 import { getFaviconUrl, getHostname } from './lib/utils';
@@ -50,16 +50,15 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [newUrl, setNewUrl] = useState({ title: '', url: '' });
 
+  // Right side grid ke liye ref
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+
   const fetchData = useCallback(async () => {
     const [catRes, toolsRes, urlsRes] = await Promise.all([
       supabase.from('categories').select('*').order('sort_order'),
       supabase.from('ai_tools').select('*').order('sort_order'),
       supabase.from('quick_urls').select('*').order('created_at', { ascending: false }),
     ]);
-
-    console.log("Categories:", catRes.data, catRes.error);
-    console.log("AI Tools:", toolsRes.data, toolsRes.error);
-    console.log("Quick URLs:", urlsRes.data, urlsRes.error);
 
     if (catRes.data) setCategories(catRes.data);
     if (toolsRes.data) setAiTools(toolsRes.data);
@@ -69,6 +68,14 @@ function App() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleCategoryChange = (catId: string | null) => {
+    setSelectedCategory(catId);
+    // Category change hote hi grid top par scroll ho jayega
+    if (gridContainerRef.current) {
+      gridContainerRef.current.scrollTop = 0;
+    }
+  };
 
   const filteredTools = aiTools.filter((tool) => {
     const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -124,21 +131,14 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-gray-100">
-      {/* Header */}
+    <div className="min-h-screen bg-black text-gray-100 flex flex-col overflow-hidden">
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-black/90 border-b border-gray-800/50">
         <div className="w-full px-6 py-4">
           <div className="flex items-center gap-4">
-           <div className="w-56 flex items-center">
-            <img
-              src="/drstoragge.png"
-              alt="Storagge"
-              className="h-10 w-auto object-contain scale-[3.2] origin-left"
-             />
-           </div>
-        
+            <div className="w-56 flex items-center">
+              <img src="/drstoragge.png" alt="Storagge" className="h-10 w-auto object-contain scale-[3.2] origin-left" />
+            </div>
 
-            {/* Search Bar - only in AI Tools tab */}
             {activeTab === 'tools' && (
               <div className="flex-1 max-w-xl mx-4">
                 <div className="relative">
@@ -156,7 +156,6 @@ function App() {
 
             {activeTab !== 'tools' && <div className="flex-1" />}
 
-            {/* Right corner: Auth / Admin / Profile */}
             <div className="flex items-center gap-2 ml-auto">
               {isAdmin && (
                 <button
@@ -172,11 +171,7 @@ function App() {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700/50">
                     {currentProfile.display_picture_url ? (
-                      <img
-                        src={currentProfile.display_picture_url}
-                        alt={currentProfile.name}
-                        className="w-6 h-6 rounded-full object-cover"
-                      />
+                      <img src={currentProfile.display_picture_url} alt={currentProfile.name} className="w-6 h-6 rounded-full object-cover" />
                     ) : (
                       <div className="w-6 h-6 rounded-full bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center text-xs font-bold text-white">
                         {currentProfile.name.charAt(0).toUpperCase()}
@@ -184,11 +179,7 @@ function App() {
                     )}
                     <span className="text-sm text-gray-200 hidden sm:inline">{currentProfile.name}</span>
                   </div>
-                  <button
-                    onClick={handleLogout}
-                    className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                    title="Logout"
-                  >
+                  <button onClick={handleLogout} className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all" title="Logout">
                     <LogOut className="w-5 h-5" />
                   </button>
                 </div>
@@ -204,14 +195,11 @@ function App() {
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="flex gap-1 mt-4 bg-gray-800/40 p-1 rounded-xl w-fit">
+          <div className="flex gap-1 mt-4 bg-gray-800/40 p-1 rounded-xl w-fit relative z-50">
             <button
               onClick={() => setActiveTab('tools')}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'tools'
-                  ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25'
-                  : 'text-gray-400 hover:text-gray-200'
+                activeTab === 'tools' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25' : 'text-gray-400 hover:text-gray-200'
               }`}
             >
               AI Tools
@@ -219,9 +207,7 @@ function App() {
             <button
               onClick={() => setActiveTab('urls')}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'urls'
-                  ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25'
-                  : 'text-gray-400 hover:text-gray-200'
+                activeTab === 'urls' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25' : 'text-gray-400 hover:text-gray-200'
               }`}
             >
               Quick URLs
@@ -230,18 +216,15 @@ function App() {
         </div>
       </header>
 
-      <main className="w-full px-6 py-6">
+      <main className="flex-1 w-full px-6 py-6 overflow-hidden h-[calc(100vh-140px)]">
         {activeTab === 'tools' ? (
-          <div className="flex gap-6">
-            {/* Category Sidebar */}
-            <aside className="w-48 flex-shrink-0 hidden md:block">
-              <div className="sticky top-36 space-y-1">
+          <div className="flex gap-6 h-full">
+            <aside className="w-48 flex-shrink-0 hidden md:block h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:hidden">
+              <div className="space-y-1">
                 <button
-                  onClick={() => setSelectedCategory(null)}
+                  onClick={() => handleCategoryChange(null)}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
-                    !selectedCategory
-                      ? 'bg-red-500/20 text-red-400'
-                      : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                    !selectedCategory ? 'bg-red-500/20 text-red-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                   }`}
                 >
                   <Sparkles className="w-4 h-4" />
@@ -250,11 +233,9 @@ function App() {
                 {categories.map((cat) => (
                   <button
                     key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
+                    onClick={() => handleCategoryChange(cat.id)}
                     className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
-                      selectedCategory === cat.id
-                        ? 'bg-red-500/20 text-red-400'
-                        : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
+                      selectedCategory === cat.id ? 'bg-red-500/20 text-red-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
                     }`}
                   >
                     {cat.icon !== "" && <CategoryIcon iconName={cat.icon} />}
@@ -264,32 +245,8 @@ function App() {
               </div>
             </aside>
 
-            {/* Tools Grid */}
-            <div className="flex-1">
-              {/* Mobile category filter */}
-              <div className="md:hidden mb-4 flex gap-2 overflow-x-auto pb-2">
-                <button
-                  onClick={() => setSelectedCategory(null)}
-                  className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap ${
-                    !selectedCategory ? 'bg-red-500/20 text-red-400' : 'text-gray-400 bg-gray-800/50'
-                  }`}
-                >
-                  All
-                </button>
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`px-3 py-1.5 rounded-lg text-sm whitespace-nowrap ${
-                      selectedCategory === cat.id ? 'bg-red-500/20 text-red-400' : 'text-gray-400 bg-gray-800/50'
-                    }`}
-                  >
-                    {cat.name}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div ref={gridContainerRef} className="flex-1 h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black [&::-webkit-scrollbar-thumb]:bg-gray-800 [&::-webkit-scrollbar-thumb]:rounded-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-10">
                 {filteredTools.map((tool) => (
                   <div
                     key={tool.id}
@@ -342,11 +299,7 @@ function App() {
                             : 'text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100'
                         }`}
                       >
-                        {tool.is_bookmarked ? (
-                          <BookmarkCheck className="w-4 h-4" />
-                        ) : (
-                          <Bookmark className="w-4 h-4" />
-                        )}
+                        {tool.is_bookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
@@ -362,12 +315,11 @@ function App() {
             </div>
           </div>
         ) : (
-          <div>
+          <div className="h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black [&::-webkit-scrollbar-thumb]:bg-gray-800 [&::-webkit-scrollbar-thumb]:rounded-full">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-gray-200">Quick Access URLs</h2>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-10">
               <button
                 onClick={() => setShowAddUrlModal(true)}
                 className="flex items-center justify-center gap-2 bg-gray-800/40 border border-dashed border-gray-700 rounded-xl p-4 text-gray-500 hover:text-red-400 hover:border-red-500/50 transition-all"
@@ -375,18 +327,12 @@ function App() {
                 <Plus className="w-5 h-5" />
                 <span>Add URL</span>
               </button>
-
               {quickUrls.map((url) => (
                 <div
                   key={url.id}
                   className="group relative bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 hover:border-rose-500/50 hover:bg-gray-800/60 transition-all duration-300"
                 >
-                  <a
-                    href={url.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3"
-                  >
+                  <a href={url.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3">
                     <div className="w-10 h-10 flex-shrink-0 rounded-lg bg-gradient-to-br from-rose-600/20 to-red-600/20 flex items-center justify-center border border-rose-500/30 overflow-hidden">
                       <img
                         src={getFaviconUrl(url.url)}
@@ -395,7 +341,6 @@ function App() {
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
-                          target.parentElement!.innerHTML = '<div class="w-5 h-5 text-rose-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>';
                         }}
                       />
                     </div>
@@ -407,7 +352,6 @@ function App() {
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-rose-400 transition-colors" />
                   </a>
-
                   <div className="absolute top-2 right-2">
                     <button
                       onClick={() => deleteUrl(url.id)}
@@ -419,18 +363,10 @@ function App() {
                 </div>
               ))}
             </div>
-
-            {quickUrls.length === 0 && (
-              <div className="text-center py-12 text-gray-500">
-                <Globe className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>No URLs saved yet</p>
-              </div>
-            )}
           </div>
         )}
       </main>
 
-      {/* Add URL Modal */}
       {showAddUrlModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
@@ -447,8 +383,7 @@ function App() {
                   type="text"
                   value={newUrl.title}
                   onChange={(e) => setNewUrl({ ...newUrl, title: e.target.value })}
-                  placeholder="My Favorite Site"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
                 />
               </div>
               <div>
@@ -457,13 +392,12 @@ function App() {
                   type="text"
                   value={newUrl.url}
                   onChange={(e) => setNewUrl({ ...newUrl, url: e.target.value })}
-                  placeholder="https://example.com"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
                 />
               </div>
               <button
                 onClick={addUrl}
-                className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-red-600 rounded-lg font-medium text-white hover:shadow-lg hover:shadow-rose-500/25 transition-all"
+                className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-red-600 rounded-lg font-medium text-white"
               >
                 Add URL
               </button>
@@ -472,7 +406,6 @@ function App() {
         </div>
       )}
 
-      {/* Auth Modal */}
       {showAuthModal && (
         <AuthModal
           onClose={() => setShowAuthModal(false)}
@@ -481,7 +414,6 @@ function App() {
         />
       )}
 
-      {/* Admin Panel */}
       {showAdminPanel && isAdmin && (
         <AdminPanel
           onClose={() => setShowAdminPanel(false)}
