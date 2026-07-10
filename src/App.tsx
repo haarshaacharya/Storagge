@@ -1,429 +1,168 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from './lib/supabase';
-import type { Category, AITool, QuickUrl, Profile } from './types/database';
-import { getFaviconUrl, getHostname } from './lib/utils';
+import { useEffect, useState, useCallback } from 'react';
+import { AuthProvider, useAuth } from './lib/auth';
+import { supabase, type AITool, type Reel, isNewActive } from './lib/supabase';
+import Navbar, { type Tab } from './components/Navbar';
 import AuthModal from './components/AuthModal';
+import AIToolsView from './components/AIToolsView';
+import QuickURLsView, { getLatestQuickUrlTime } from './components/QuickURLsView';
+import ReelsView from './components/ReelsView';
+import ProfileModal from './components/ProfileModal';
+import SavedDrawer from './components/SavedDrawer';
 import AdminPanel from './components/AdminPanel';
-import {
-  Search,
-  Bookmark,
-  BookmarkCheck,
-  ExternalLink,
-  Plus,
-  Trash2,
-  X,
-  Code,
-  Music,
-  Film,
-  PenTool,
-  Palette,
-  Sparkles,
-  Folder,
-  ChevronRight,
-  Globe,
-  User,
-  LogOut,
-  Shield,
-} from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  Code,
-  Music,
-  Film,
-  PenTool,
-  Palette,
-  Sparkles,
-  Folder,
-};
+function Hub() {
+  const { user, profile, loading } = useAuth();
+  const [tab, setTab] = useState<Tab>('tools');
+  const [search, setSearch] = useState('');
+  const [showAuth, setShowAuth] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [viewProfileId, setViewProfileId] = useState<string | null>(null);
+  const [showSaved, setShowSaved] = useState(false);
+  const [adminMode, setAdminMode] = useState(false);
 
-function App() {
-  const [activeTab, setActiveTab] = useState<'tools' | 'urls'>('tools');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [aiTools, setAiTools] = useState<AITool[]>([]);
-  const [quickUrls, setQuickUrls] = useState<QuickUrl[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [showAddUrlModal, setShowAddUrlModal] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [newUrl, setNewUrl] = useState({ title: '', url: '' });
+  // notification dots: tracks unseen new tools / new urls / new reels since last view
+  const [dots, setDots] = useState({ tools: false, urls: false, reels: false });
+  const [seenToolsAt, setSeenToolsAt] = useState<number>(Number(localStorage.getItem('seenToolsAt') || Date.now()));
+  const [seenReelsAt, setSeenReelsAt] = useState<number>(Number(localStorage.getItem('seenReelsAt') || Date.now()));
 
-  // Right side grid ke liye ref
-  const gridContainerRef = useRef<HTMLDivElement>(null);
-
-  const fetchData = useCallback(async () => {
-    const [catRes, toolsRes, urlsRes] = await Promise.all([
-      supabase.from('categories').select('*').order('sort_order'),
-      supabase.from('ai_tools').select('*').order('sort_order'),
-      supabase.from('quick_urls').select('*').order('created_at', { ascending: false }),
-    ]);
-
-    if (catRes.data) setCategories(catRes.data);
-    if (toolsRes.data) setAiTools(toolsRes.data);
-    if (urlsRes.data) setQuickUrls(urlsRes.data);
+  // Hidden admin entry: via #admin hash. Only the admin profile can actually use it.
+  useEffect(() => {
+    function checkHash() {
+      if (window.location.hash === '#admin') {
+        setAdminMode(true);
+      }
+    }
+    checkHash();
+    window.addEventListener('hashchange', checkHash);
+    return () => window.removeEventListener('hashchange', checkHash);
   }, []);
 
+  // New tools detection for red dot on Tools tab
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (adminMode) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('ai_tools')
+        .select('created_at, is_new')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (!active || !data) return;
+      const hasNew = (data as AITool[]).some(
+        (t) => isNewActive(t.created_at, t.is_new) && new Date(t.created_at).getTime() > seenToolsAt
+      );
+      setDots((d) => ({ ...d, tools: hasNew }));
+    })();
+    return () => { active = false; };
+  }, [seenToolsAt, adminMode]);
 
-  const handleCategoryChange = (catId: string | null) => {
-    setSelectedCategory(catId);
-    // Category change hote hi grid top par scroll ho jayega
-    if (gridContainerRef.current) {
-      gridContainerRef.current.scrollTop = 0;
+  // New reels detection for red dot on Reels tab
+  useEffect(() => {
+    if (adminMode) return;
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('reels')
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!active || !data || data.length === 0) return;
+      const newest = new Date((data as Reel[])[0].created_at).getTime();
+      setDots((d) => ({ ...d, reels: newest > seenReelsAt }));
+    })();
+    return () => { active = false; };
+  }, [seenReelsAt, adminMode]);
+
+  // Quick URLs dot: new since last visit (user-scoped, localStorage)
+  useEffect(() => {
+    if (adminMode || !user) { setDots((d) => ({ ...d, urls: false })); return; }
+    const seenUrlsAt = Number(localStorage.getItem('seenUrlsAt') || Date.now());
+    const latest = getLatestQuickUrlTime(user.id);
+    setDots((d) => ({ ...d, urls: latest > seenUrlsAt }));
+  }, [user, adminMode]);
+
+  const onTab = useCallback((t: Tab) => {
+    setTab(t);
+    // clear dot when visiting
+    if (t === 'tools') {
+      const now = Date.now();
+      setSeenToolsAt(now);
+      localStorage.setItem('seenToolsAt', String(now));
+      setDots((d) => ({ ...d, tools: false }));
+    } else if (t === 'reels') {
+      const now = Date.now();
+      setSeenReelsAt(now);
+      localStorage.setItem('seenReelsAt', String(now));
+      setDots((d) => ({ ...d, reels: false }));
+    } else if (t === 'urls') {
+      const now = Date.now();
+      localStorage.setItem('seenUrlsAt', String(now));
+      setDots((d) => ({ ...d, urls: false }));
     }
-  };
+  }, []);
 
-  const filteredTools = aiTools.filter((tool) => {
-    const matchesSearch = tool.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = !selectedCategory || tool.category_id === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
-
-  const toggleToolBookmark = async (id: string, current: boolean) => {
-    await supabase.from('ai_tools').update({ is_bookmarked: !current }).eq('id', id);
-    fetchData();
-  };
-
-  const logToolUsage = async (tool: AITool) => {
-    await supabase.from('tool_usage_logs').insert({
-      tool_id: tool.id,
-      tool_name: tool.name,
-      user_id: currentProfile?.id || null,
-    });
-  };
-
-  const deleteUrl = async (id: string) => {
-    await supabase.from('quick_urls').delete().eq('id', id);
-    fetchData();
-  };
-
-  const addUrl = async () => {
-    if (!newUrl.title || !newUrl.url) return;
-    await supabase.from('quick_urls').insert({
-      title: newUrl.title,
-      url: newUrl.url.startsWith('http') ? newUrl.url : `https://${newUrl.url}`,
-    });
-    setNewUrl({ title: '', url: '' });
-    setShowAddUrlModal(false);
-    fetchData();
-  };
-
-  const handleAuthSuccess = (profile: Profile) => {
-    setCurrentProfile(profile);
-    if (profile.is_admin) {
-      setIsAdmin(true);
+  if (adminMode) {
+    if (loading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-zinc-950">
+          <div className="w-8 h-8 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+        </div>
+      );
     }
-  };
-
-  const handleLogout = () => {
-    setCurrentProfile(null);
-    setIsAdmin(false);
-    setShowAdminPanel(false);
-  };
-
-  const CategoryIcon = ({ iconName }: { iconName: string }) => {
-    const Icon = iconMap[iconName] || Folder;
-    return <Icon className="w-5 h-5" />;
-  };
+    return (
+      <AdminPanel
+        onExit={() => {
+          setAdminMode(false);
+          if (window.location.hash === '#admin') {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-black text-gray-100 flex flex-col overflow-hidden">
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-black/90 border-b border-gray-800/50">
-        <div className="w-full px-6 py-4">
-          <div className="flex items-center gap-4">
-            <div className="w-56 flex items-center">
-              <img src="/drstoragge.png" alt="Storagge" className="h-10 w-auto object-contain scale-[3.2] origin-left" />
-            </div>
+    <div className="min-h-screen bg-zinc-950 text-white">
+      <Navbar
+        tab={tab}
+        onTab={onTab}
+        search={search}
+        onSearch={setSearch}
+        onOpenAuth={() => setShowAuth(true)}
+        onOpenProfile={() => { setViewProfileId(null); setShowProfile(true); }}
+        onOpenSaved={() => setShowSaved(true)}
+        dots={dots}
+      />
 
-            {activeTab === 'tools' && (
-              <div className="flex-1 max-w-xl mx-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-                  <input
-                    type="text"
-                    placeholder="Search AI tools..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-gray-800/60 border border-gray-700/50 rounded-xl text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500/50 transition-all"
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeTab !== 'tools' && <div className="flex-1" />}
-
-            <div className="flex items-center gap-2 ml-auto">
-              {isAdmin && (
-                <button
-                  onClick={() => setShowAdminPanel(true)}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all text-sm font-medium"
-                >
-                  <Shield className="w-4 h-4" />
-                  <span className="hidden sm:inline">Admin Panel</span>
-                </button>
-              )}
-
-              {currentProfile ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700/50">
-                    {currentProfile.display_picture_url ? (
-                      <img src={currentProfile.display_picture_url} alt={currentProfile.name} className="w-6 h-6 rounded-full object-cover" />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center text-xs font-bold text-white">
-                        {currentProfile.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <span className="text-sm text-gray-200 hidden sm:inline">{currentProfile.name}</span>
-                  </div>
-                  <button onClick={handleLogout} className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-all" title="Logout">
-                    <LogOut className="w-5 h-5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-red-600 to-rose-600 text-white font-medium text-sm hover:shadow-lg hover:shadow-red-500/25 transition-all"
-                >
-                  <User className="w-4 h-4" />
-                  Sign In / Sign Up
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex gap-1 mt-4 bg-gray-800/40 p-1 rounded-xl w-fit relative z-50">
-            <button
-              onClick={() => setActiveTab('tools')}
-              className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'tools' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25' : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              AI Tools
-            </button>
-            <button
-              onClick={() => setActiveTab('urls')}
-              className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                activeTab === 'urls' ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-lg shadow-red-500/25' : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              Quick URLs
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 w-full px-6 py-6 overflow-hidden h-[calc(100vh-140px)]">
-        {activeTab === 'tools' ? (
-          <div className="flex gap-6 h-full">
-            <aside className="w-48 flex-shrink-0 hidden md:block h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:hidden">
-              <div className="space-y-1">
-                <button
-                  onClick={() => handleCategoryChange(null)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
-                    !selectedCategory ? 'bg-red-500/20 text-red-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="text-sm font-medium">All Tools</span>
-                </button>
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => handleCategoryChange(cat.id)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all ${
-                      selectedCategory === cat.id ? 'bg-red-500/20 text-red-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
-                    }`}
-                  >
-                    {cat.icon !== "" && <CategoryIcon iconName={cat.icon} />}
-                    <span className="text-sm font-medium">{cat.name}</span>
-                  </button>
-                ))}
-              </div>
-            </aside>
-
-            <div ref={gridContainerRef} className="flex-1 h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black [&::-webkit-scrollbar-thumb]:bg-gray-800 [&::-webkit-scrollbar-thumb]:rounded-full">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-10">
-                {filteredTools.map((tool) => (
-                  <div
-                    key={tool.id}
-                    className="group relative bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 hover:border-red-500/50 hover:bg-gray-800/60 transition-all duration-300"
-                  >
-                    <a
-                      href={tool.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => logToolUsage(tool)}
-                      className="flex items-start gap-3"
-                    >
-                      <div className="w-12 h-12 flex-shrink-0 rounded-xl bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center overflow-hidden border border-gray-600/50">
-                        {tool.logo_url ? (
-                          <img
-                            src={tool.logo_url}
-                            alt={tool.name}
-                            className="w-10 h-10 object-cover rounded-lg"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = getFaviconUrl(tool.url);
-                            }}
-                          />
-                        ) : (
-                          <img
-                            src={getFaviconUrl(tool.url)}
-                            alt={tool.name}
-                            className="w-7 h-7 object-contain"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-100 truncate group-hover:text-red-400 transition-colors">
-                          {tool.name}
-                        </h3>
-                        <p className="text-xs text-gray-500 truncate">{getHostname(tool.url)}</p>
-                      </div>
-                      <ExternalLink className="w-4 h-4 text-gray-600 group-hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" />
-                    </a>
-
-                    <div className="absolute top-2 right-2 flex items-center gap-1">
-                      <button
-                        onClick={() => toggleToolBookmark(tool.id, tool.is_bookmarked)}
-                        className={`p-1.5 rounded-lg transition-all ${
-                          tool.is_bookmarked
-                            ? 'text-rose-400 bg-rose-500/20'
-                            : 'text-gray-600 hover:text-rose-400 hover:bg-rose-500/10 opacity-0 group-hover:opacity-100'
-                        }`}
-                      >
-                        {tool.is_bookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {filteredTools.length === 0 && (
-                <div className="text-center py-12 text-gray-500">
-                  <Sparkles className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No tools found</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black [&::-webkit-scrollbar-thumb]:bg-gray-800 [&::-webkit-scrollbar-thumb]:rounded-full">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-200">Quick Access URLs</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-10">
-              <button
-                onClick={() => setShowAddUrlModal(true)}
-                className="flex items-center justify-center gap-2 bg-gray-800/40 border border-dashed border-gray-700 rounded-xl p-4 text-gray-500 hover:text-red-400 hover:border-red-500/50 transition-all"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Add URL</span>
-              </button>
-              {quickUrls.map((url) => (
-                <div
-                  key={url.id}
-                  className="group relative bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 hover:border-rose-500/50 hover:bg-gray-800/60 transition-all duration-300"
-                >
-                  <a href={url.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3">
-                    <div className="w-10 h-10 flex-shrink-0 rounded-lg bg-gradient-to-br from-rose-600/20 to-red-600/20 flex items-center justify-center border border-rose-500/30 overflow-hidden">
-                      <img
-                        src={getFaviconUrl(url.url)}
-                        alt={url.title}
-                        className="w-6 h-6 object-contain"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                        }}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-gray-100 truncate group-hover:text-rose-400 transition-colors">
-                        {url.title}
-                      </h3>
-                      <p className="text-xs text-gray-500 truncate">{getHostname(url.url)}</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-rose-400 transition-colors" />
-                  </a>
-                  <div className="absolute top-2 right-2">
-                    <button
-                      onClick={() => deleteUrl(url.id)}
-                      className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      <main className="w-full px-4 py-6">
+        {tab === 'tools' && <AIToolsView search={search} />}
+        {tab === 'urls' && <QuickURLsView onOpenAuth={() => setShowAuth(true)} />}
+        {tab === 'reels' && <ReelsView onOpenAuth={() => setShowAuth(true)} onOpenProfile={(p) => { setViewProfileId(p.id); setShowProfile(true); }} />}
       </main>
 
-      {showAddUrlModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-100">Add Quick URL</h3>
-              <button onClick={() => setShowAddUrlModal(false)} className="text-gray-500 hover:text-gray-300">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Title</label>
-                <input
-                  type="text"
-                  value={newUrl.title}
-                  onChange={(e) => setNewUrl({ ...newUrl, title: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">URL</label>
-                <input
-                  type="text"
-                  value={newUrl.url}
-                  onChange={(e) => setNewUrl({ ...newUrl, url: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
-                />
-              </div>
-              <button
-                onClick={addUrl}
-                className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-red-600 rounded-lg font-medium text-white"
-              >
-                Add URL
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+      {showProfile && user && <ProfileModal onClose={() => setShowProfile(false)} profileId={viewProfileId} onOpenAdmin={() => { setShowProfile(false); setAdminMode(true); window.location.hash = 'admin'; }} />}
+      {showSaved && user && <SavedDrawer onClose={() => setShowSaved(false)} />}
 
-      {showAuthModal && (
-        <AuthModal
-          onClose={() => setShowAuthModal(false)}
-          onAuthSuccess={handleAuthSuccess}
-          onAdminLogin={() => setShowAdminPanel(true)}
-        />
-      )}
-
-      {showAdminPanel && isAdmin && (
-        <AdminPanel
-          onClose={() => setShowAdminPanel(false)}
-          categories={categories}
-          aiTools={aiTools}
-          onDataChange={fetchData}
-        />
+      {/* Footer hint for admin */}
+      {profile?.is_admin && (
+        <button
+          onClick={() => { setAdminMode(true); window.location.hash = 'admin'; }}
+          className="fixed bottom-4 left-4 z-30 w-9 h-9 rounded-full bg-zinc-900/80 border border-zinc-800 text-zinc-600 hover:text-red-400 flex items-center justify-center transition"
+          title="Admin"
+        >
+          <Sparkles className="w-4 h-4" />
+        </button>
       )}
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <Hub />
+    </AuthProvider>
+  );
+}

@@ -1,582 +1,586 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import type { Profile, ToolUsageLog, AITool, Category } from '../types/database';
-import { getHostname } from '../lib/utils';
+import { useEffect, useRef, useState } from 'react';
+import { supabase, type AITool, type Category, type Profile, isNewActive } from '../lib/supabase';
+import { useAuth } from '../lib/auth';
 import {
-  X,
-  Users,
-  BarChart3,
-  TrendingUp,
-  Calendar,
-  Activity,
-  Trash2,
-  Search,
-  Eye,
-  EyeOff,
-  Shield,
-  Plus,
-  Globe,
+  Plus, Search, Trash2, Pencil, X, Tag, LayoutGrid, BarChart3, Users,
+  LogOut, ExternalLink, Check, Upload, RefreshCw, Loader2,
 } from 'lucide-react';
+import AdminAnalytics from './AdminAnalytics';
 
-interface AdminPanelProps {
-  onClose: () => void;
-  categories: Category[];
-  aiTools: AITool[];
-  onDataChange: () => void;
-}
+type Section = 'tools' | 'categories' | 'analytics' | 'users';
 
-export default function AdminPanel({ onClose, categories, aiTools, onDataChange }: AdminPanelProps) {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'users' | 'tools'>('dashboard');
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [usageLogs, setUsageLogs] = useState<ToolUsageLog[]>([]);
-  const [searchUser, setSearchUser] = useState('');
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
-  const [showAddToolModal, setShowAddToolModal] = useState(false);
-  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
-  const [newTool, setNewTool] = useState({ name: '', url: '', logo_url: '', category_id: '' });
-  const [newCategory, setNewCategory] = useState({ name: '', icon: 'Folder' });
+export default function AdminPanel({ onExit }: { onExit: () => void }) {
+  const { profile, signOut } = useAuth();
+  const [section, setSection] = useState<Section>('tools');
+  const [tools, setTools] = useState<AITool[]>([]);
+  const [cats, setCats] = useState<Category[]>([]);
+  const [users, setUsers] = useState<Profile[]>([]);
+  const [toolSearch, setToolSearch] = useState('');
+  const [editingTool, setEditingTool] = useState<Partial<AITool> | null>(null);
+  const [editingCat, setEditingCat] = useState<Partial<Category> | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const fetchAdminData = useCallback(async () => {
-    const [profilesRes, logsRes] = await Promise.all([
+  async function loadAll() {
+    const [t, c, u] = await Promise.all([
+      supabase.from('ai_tools').select('*').order('sort_order').order('created_at', { ascending: false }),
+      supabase.from('categories').select('*').order('sort_order'),
       supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-      supabase.from('tool_usage_logs').select('*').order('clicked_at', { ascending: false }).limit(1000),
     ]);
-    if (profilesRes.data) setProfiles(profilesRes.data as Profile[]);
-    if (logsRes.data) setUsageLogs(logsRes.data as ToolUsageLog[]);
-  }, []);
-
-  useEffect(() => {
-    fetchAdminData();
-  }, [fetchAdminData]);
-
-  // Analytics calculations
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekStart = new Date(todayStart);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const todayUsers = new Set(
-    usageLogs.filter((l) => new Date(l.clicked_at) >= todayStart).map((l) => l.user_id)
-  ).size;
-  const weekUsers = new Set(
-    usageLogs.filter((l) => new Date(l.clicked_at) >= weekStart).map((l) => l.user_id)
-  ).size;
-  const monthUsers = new Set(
-    usageLogs.filter((l) => new Date(l.clicked_at) >= monthStart).map((l) => l.user_id)
-  ).size;
-
-  const todayClicks = usageLogs.filter((l) => new Date(l.clicked_at) >= todayStart).length;
-  const weekClicks = usageLogs.filter((l) => new Date(l.clicked_at) >= weekStart).length;
-  const monthClicks = usageLogs.filter((l) => new Date(l.clicked_at) >= monthStart).length;
-
-  // Per-tool usage counts
-  const toolUsageMap = new Map<string, number>();
-  usageLogs.forEach((log) => {
-    const key = log.tool_name;
-    toolUsageMap.set(key, (toolUsageMap.get(key) || 0) + 1);
-  });
-  const toolUsageSorted = Array.from(toolUsageMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-  const maxToolUsage = Math.max(...toolUsageSorted.map((t) => t[1]), 1);
-
-  // Weekly chart data (last 7 days)
-  const weekDays: { day: string; count: number }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const dayStart = new Date(todayStart);
-    dayStart.setDate(dayStart.getDate() - i);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    const count = usageLogs.filter(
-      (l) => new Date(l.clicked_at) >= dayStart && new Date(l.clicked_at) < dayEnd
-    ).length;
-    weekDays.push({
-      day: dayStart.toLocaleDateString('en', { weekday: 'short' }),
-      count,
-    });
+    setTools((t.data as AITool[]) ?? []);
+    setCats((c.data as Category[]) ?? []);
+    setUsers((u.data as Profile[]) ?? []);
+    setLoading(false);
   }
-  const maxWeekCount = Math.max(...weekDays.map((d) => d.count), 1);
 
-  // Monthly chart data (last 30 days, grouped by day)
-  const monthDays: { day: number; count: number }[] = [];
-  for (let i = 29; i >= 0; i--) {
-    const dayStart = new Date(todayStart);
-    dayStart.setDate(dayStart.getDate() - i);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    const count = usageLogs.filter(
-      (l) => new Date(l.clicked_at) >= dayStart && new Date(l.clicked_at) < dayEnd
-    ).length;
-    monthDays.push({ day: dayStart.getDate(), count });
-  }
-  const maxMonthCount = Math.max(...monthDays.map((d) => d.count), 1);
+  useEffect(() => { loadAll(); }, []);
 
-  const filteredProfiles = profiles.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchUser.toLowerCase()) ||
-      (p.email || '').toLowerCase().includes(searchUser.toLowerCase()) ||
-      (p.phone || '').toLowerCase().includes(searchUser.toLowerCase())
-  );
-
-  const addTool = async () => {
-    if (!newTool.name || !newTool.url) return;
-    const maxOrder = Math.max(...aiTools.map((t) => t.sort_order), 0);
-    await supabase.from('ai_tools').insert({
-      name: newTool.name,
-      url: newTool.url.startsWith('http') ? newTool.url : `https://${newTool.url}`,
-      logo_url: newTool.logo_url || null,
-      category_id: newTool.category_id || null,
-      sort_order: maxOrder + 1,
-    });
-    setNewTool({ name: '', url: '', logo_url: '', category_id: '' });
-    setShowAddToolModal(false);
-    onDataChange();
-  };
-
-  const deleteTool = async (id: string) => {
-    await supabase.from('ai_tools').delete().eq('id', id);
-    onDataChange();
-  };
-
-  const addCategory = async () => {
-    if (!newCategory.name) return;
-    const maxOrder = Math.max(...categories.map((c) => c.sort_order), 0);
-    await supabase.from('categories').insert({
-      name: newCategory.name,
-      icon: newCategory.icon,
-      sort_order: maxOrder + 1,
-    });
-    setNewCategory({ name: '', icon: '' });
-    setShowAddCategoryModal(false);
-    onDataChange();
-  };
-
-  const deleteCategory = async (id: string) => {
-    await supabase.from('ai_tools').update({ category_id: null }).eq('category_id', id);
-    await supabase.from('categories').delete().eq('id', id);
-    onDataChange();
-  };
-
-  const togglePasswordVisibility = (id: string) => {
-    setVisiblePasswords((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const statCard = (icon: React.ReactNode, label: string, value: number, color: string) => (
-    <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <div className={`p-2 rounded-lg ${color}`}>{icon}</div>
-        <span className="text-sm text-gray-400">{label}</span>
+  if (!profile?.is_admin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-white">
+        <div className="text-center">
+          <p className="text-zinc-400">Access denied — admin only.</p>
+          <button onClick={onExit} className="mt-4 text-red-400 hover:text-red-300">Back to site</button>
+        </div>
       </div>
-      <p className="text-2xl font-bold text-gray-100">{value}</p>
-    </div>
-  );
+    );
+  }
+
+  const filteredTools = tools.filter((t) => {
+    const q = toolSearch.trim().toLowerCase();
+    if (!q) return true;
+    return t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q);
+  });
+
+  async function saveTool(logoUrl: string) {
+    if (!editingTool) return;
+    const payload = {
+      name: editingTool.name || 'Untitled',
+      url: editingTool.url || '',
+      logo_url: logoUrl,
+      category_id: editingTool.category_id || null,
+      description: editingTool.description || '',
+      is_new: editingTool.is_new ?? false,
+      sort_order: editingTool.sort_order ?? 0,
+    };
+    if (editingTool.id) {
+      await supabase.from('ai_tools').update(payload).eq('id', editingTool.id);
+    } else {
+      await supabase.from('ai_tools').insert(payload);
+    }
+    setEditingTool(null);
+    await loadAll();
+  }
+
+  async function deleteTool(id: string) {
+    if (!confirm('Delete this AI tool?')) return;
+    await supabase.from('ai_tools').delete().eq('id', id);
+    await loadAll();
+  }
+
+  async function saveCat() {
+    if (!editingCat) return;
+    const payload = {
+      name: editingCat.name || 'Untitled',
+      icon: editingCat.icon || 'Code2',
+      sort_order: editingCat.sort_order ?? 0,
+    };
+    if (editingCat.id) {
+      await supabase.from('categories').update(payload).eq('id', editingCat.id);
+    } else {
+      await supabase.from('categories').insert(payload);
+    }
+    setEditingCat(null);
+    await loadAll();
+  }
+
+  async function deleteCat(id: string) {
+    if (!confirm('Delete this category? Tools in it will be uncategorized.')) return;
+    await supabase.from('categories').delete().eq('id', id);
+    await loadAll();
+  }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex">
-      <div className="bg-gray-900 border-l border-gray-700/50 w-full max-w-5xl ml-auto h-full overflow-y-auto shadow-2xl">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-gray-900/95 backdrop-blur-xl border-b border-gray-800/50 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-red-400" />
-            <h2 className="text-xl font-bold text-gray-100">Admin Panel</h2>
+    <div className="h-screen flex flex-col bg-zinc-950 text-white">
+      <header className="h-14 shrink-0 border-b border-zinc-800 flex items-center justify-between px-4 bg-zinc-950">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center">
+            <Tag className="w-4 h-4 text-white" />
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
-            <X className="w-6 h-6" />
+          <span className="font-bold">Admin Panel</span>
+          <span className="text-xs text-red-400 bg-red-950/40 px-2 py-0.5 rounded-full ml-2">Hidden</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-zinc-400 hidden sm:block">{profile.display_name || profile.email_or_phone}</span>
+          <button onClick={onExit} className="text-sm text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-zinc-800 transition flex items-center gap-1">
+            <X className="w-4 h-4" /> Exit
+          </button>
+          <button onClick={signOut} className="text-sm text-red-400 hover:text-red-300 px-3 py-1.5 rounded-lg hover:bg-zinc-800 transition flex items-center gap-1">
+            <LogOut className="w-4 h-4" /> Logout
           </button>
         </div>
+      </header>
 
-        {/* Tabs */}
-        <div className="px-6 py-4 flex gap-2 border-b border-gray-800/50">
-          {[
-            { id: 'dashboard' as const, label: 'Dashboard', icon: <BarChart3 className="w-4 h-4" /> },
-            { id: 'users' as const, label: 'Users', icon: <Users className="w-4 h-4" /> },
-            { id: 'tools' as const, label: 'Tools & Categories', icon: <Activity className="w-4 h-4" /> },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSection(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                activeSection === tab.id
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex-1 flex overflow-hidden">
+        <aside className="w-60 shrink-0 border-r border-zinc-800 bg-zinc-950 overflow-y-auto scrollbar-thin">
+          <nav className="p-3 space-y-1">
+            <SideBtn active={section === 'tools'} onClick={() => setSection('tools')} icon={<LayoutGrid className="w-4 h-4" />} label="AI Tools" />
+            <SideBtn active={section === 'categories'} onClick={() => setSection('categories')} icon={<Tag className="w-4 h-4" />} label="Categories" />
+            <SideBtn active={section === 'analytics'} onClick={() => setSection('analytics')} icon={<BarChart3 className="w-4 h-4" />} label="Analytics" />
+            <SideBtn active={section === 'users'} onClick={() => setSection('users')} icon={<Users className="w-4 h-4" />} label="Users" />
+          </nav>
+          <div className="px-4 py-3 border-t border-zinc-800 text-xs text-zinc-500">
+            <p>{tools.length} tools</p>
+            <p>{cats.length} categories</p>
+            <p>{users.length} users</p>
+          </div>
+        </aside>
 
-        <div className="p-6">
-          {/* DASHBOARD */}
-          {activeSection === 'dashboard' && (
-            <div className="space-y-6">
-              {/* Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                {statCard(<Users className="w-5 h-5 text-red-400" />, "Today's Users", todayUsers, 'bg-red-500/10')}
-                {statCard(<TrendingUp className="w-5 h-5 text-rose-400" />, "Today's Clicks", todayClicks, 'bg-rose-500/10')}
-                {statCard(<Calendar className="w-5 h-5 text-red-300" />, 'Weekly Users', weekUsers, 'bg-red-500/10')}
-                {statCard(<Activity className="w-5 h-5 text-rose-300" />, 'Weekly Clicks', weekClicks, 'bg-rose-500/10')}
-                {statCard(<Calendar className="w-5 h-5 text-red-400" />, 'Monthly Users', monthUsers, 'bg-red-500/10')}
-                {statCard(<BarChart3 className="w-5 h-5 text-rose-400" />, 'Monthly Clicks', monthClicks, 'bg-rose-500/10')}
+        <main className="flex-1 overflow-y-auto scrollbar-thin p-6">
+          {section === 'tools' && (
+            <div>
+              <div className="flex items-center gap-3 mb-5">
+                <h1 className="text-2xl font-bold">AI Tools</h1>
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    value={toolSearch}
+                    onChange={(e) => setToolSearch(e.target.value)}
+                    placeholder="Search tools…"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-4 py-2 text-sm focus:border-red-600 outline-none"
+                  />
+                </div>
+                <button
+                  onClick={() => setEditingTool({ name: '', url: '', logo_url: '', category_id: cats[0]?.id ?? null, description: '', is_new: false, sort_order: 0 })}
+                  className="flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium px-4 py-2 text-sm transition shrink-0"
+                >
+                  <Plus className="w-4 h-4" /> Add AI Tool
+                </button>
               </div>
 
-              {/* Weekly Chart */}
-              <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-gray-300 mb-4">Weekly Usage (Last 7 Days)</h3>
-                <div className="flex items-end justify-between gap-2 h-40">
-                  {weekDays.map((d, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-2">
-                      <div className="w-full flex-1 flex items-end">
-                        <div
-                          className="w-full bg-gradient-to-t from-red-500 to-rose-500 rounded-t-lg transition-all hover:opacity-80 relative group"
-                          style={{ height: `${(d.count / maxWeekCount) * 100}%`, minHeight: d.count > 0 ? '8px' : '2px' }}
-                        >
-                          <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            {d.count}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-500">{d.day}</span>
+              {loading ? (
+                <p className="text-zinc-500">Loading…</p>
+              ) : (
+                <div className="rounded-xl border border-zinc-800 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase">
+                      <tr>
+                        <th className="text-left px-4 py-2.5">Tool</th>
+                        <th className="text-left px-4 py-2.5 hidden md:table-cell">Category</th>
+                        <th className="text-left px-4 py-2.5">New tag</th>
+                        <th className="text-right px-4 py-2.5">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredTools.map((t) => {
+                        const cat = cats.find((c) => c.id === t.category_id);
+                        const newActive = isNewActive(t.created_at, t.is_new);
+                        return (
+                          <tr key={t.id} className="border-t border-zinc-800 hover:bg-zinc-900/50">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2.5">
+                                <SmallLogo url={t.logo_url} site={t.url} name={t.name} />
+                                <div className="min-w-0">
+                                  <p className="font-medium text-white truncate">{t.name}</p>
+                                  <p className="text-zinc-500 text-xs truncate">{t.url}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5 hidden md:table-cell text-zinc-300">{cat?.name ?? '—'}</td>
+                            <td className="px-4 py-2.5">
+                              {newActive ? (
+                                <span className="text-[10px] font-bold uppercase bg-red-600 text-white px-2 py-0.5 rounded-full">New</span>
+                              ) : t.is_new ? (
+                                <span className="text-[10px] text-zinc-500">Expired</span>
+                              ) : (
+                                <span className="text-zinc-600">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center justify-end gap-1">
+                                <a href={t.url} target="_blank" rel="noopener noreferrer" className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400">
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                                <button onClick={() => setEditingTool(t)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => deleteTool(t.id)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-red-400">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {filteredTools.length === 0 && (
+                        <tr><td colSpan={4} className="px-4 py-10 text-center text-zinc-500">No tools match your search.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {section === 'categories' && (
+            <div>
+              <div className="flex items-center justify-between mb-5">
+                <h1 className="text-2xl font-bold">Categories</h1>
+                <button
+                  onClick={() => setEditingCat({ name: '', icon: 'Code2', sort_order: 0 })}
+                  className="flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium px-4 py-2 text-sm transition"
+                >
+                  <Plus className="w-4 h-4" /> Add Category
+                </button>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {cats.map((c) => (
+                  <div key={c.id} className="rounded-xl bg-zinc-900 border border-zinc-800 p-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-white">{c.name}</p>
+                      <p className="text-xs text-zinc-500">{tools.filter((t) => t.category_id === c.id).length} tools</p>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Monthly Chart */}
-              <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-gray-300 mb-4">Monthly Usage (Last 30 Days)</h3>
-                <div className="flex items-end justify-between gap-1 h-32">
-                  {monthDays.map((d, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center">
-                      <div className="w-full flex-1 flex items-end">
-                        <div
-                          className="w-full bg-gradient-to-t from-red-600 to-rose-600 rounded-t transition-all hover:opacity-80 relative group"
-                          style={{ height: `${(d.count / maxMonthCount) * 100}%`, minHeight: d.count > 0 ? '4px' : '1px' }}
-                        >
-                          <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-xs text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            {d.count}
-                          </span>
-                        </div>
-                      </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => setEditingCat(c)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => deleteCat(c.id)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-red-400">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  ))}
-                </div>
-                <div className="flex justify-between mt-2 text-xs text-gray-500">
-                  <span>30 days ago</span>
-                  <span>Today</span>
-                </div>
-              </div>
-
-              {/* Per-Tool Usage */}
-              <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-semibold text-gray-300 mb-4">Most Used Tools</h3>
-                {toolUsageSorted.length === 0 ? (
-                  <p className="text-gray-500 text-sm text-center py-4">No usage data yet</p>
-                ) : (
-                  <div className="space-y-3">
-                    {toolUsageSorted.map(([name, count]) => (
-                      <div key={name} className="flex items-center gap-3">
-                        <span className="text-sm text-gray-300 w-32 truncate">{name}</span>
-                        <div className="flex-1 bg-gray-700/30 rounded-full h-6 overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-red-500 to-rose-500 rounded-full flex items-center justify-end pr-2 transition-all"
-                            style={{ width: `${(count / maxToolUsage) * 100}%` }}
-                          >
-                            <span className="text-xs text-white font-medium">{count}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )}
 
-          {/* USERS */}
-          {activeSection === 'users' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-gray-200">
-                  Registered Users ({profiles.length})
-                </h3>
-                <div className="relative w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                  <input
-                    type="text"
-                    value={searchUser}
-                    onChange={(e) => setSearchUser(e.target.value)}
-                    placeholder="Search users..."
-                    className="w-full pl-9 pr-3 py-2 bg-gray-800/60 border border-gray-700/50 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500/50 text-sm"
-                  />
-                </div>
-              </div>
+          {section === 'analytics' && <AdminAnalytics tools={tools} />}
 
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-700/50 text-left text-sm text-gray-400">
-                      <th className="py-3 px-3">Name</th>
-                      <th className="py-3 px-3">Email</th>
-                      <th className="py-3 px-3">Phone</th>
-                      <th className="py-3 px-3">Password</th>
-                      <th className="py-3 px-3">Admin</th>
-                      <th className="py-3 px-3">Joined</th>
+          {section === 'users' && (
+            <div>
+              <h1 className="text-2xl font-bold mb-5">Users</h1>
+              <div className="rounded-xl border border-zinc-800 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase">
+                    <tr>
+                      <th className="text-left px-4 py-2.5">Name</th>
+                      <th className="text-left px-4 py-2.5">Email / Number</th>
+                      <th className="text-left px-4 py-2.5 hidden sm:table-cell">Password</th>
+                      <th className="text-left px-4 py-2.5">Role</th>
+                      <th className="text-left px-4 py-2.5 hidden md:table-cell">Joined</th>
+                      <th className="text-left px-4 py-2.5 hidden md:table-cell">Last login</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProfiles.map((p) => (
-                      <tr key={p.id} className="border-b border-gray-800/30 hover:bg-gray-800/30 transition-colors">
-                        <td className="py-3 px-3">
+                    {users.map((u) => (
+                      <tr key={u.id} className="border-t border-zinc-800 hover:bg-zinc-900/50">
+                        <td className="px-4 py-2.5">
                           <div className="flex items-center gap-2">
-                            {p.display_picture_url ? (
-                              <img src={p.display_picture_url} alt={p.name} className="w-8 h-8 rounded-full object-cover" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs text-gray-400">
-                                {p.name.charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                            <span className="text-gray-200 text-sm">{p.name}</span>
+                            <div className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                              {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : (u.display_name || u.email_or_phone || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <span className="font-medium text-white">{u.display_name || '—'}</span>
                           </div>
                         </td>
-                        <td className="py-3 px-3 text-gray-400 text-sm">{p.email || '-'}</td>
-                        <td className="py-3 px-3 text-gray-400 text-sm">{p.phone || '-'}</td>
-                        <td className="py-3 px-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-400 text-sm font-mono">
-                              {visiblePasswords[p.id] ? p.password_hash : '••••••••••••'}
-                            </span>
-                            <button
-                              onClick={() => togglePasswordVisibility(p.id)}
-                              className="text-gray-500 hover:text-gray-300 transition-colors"
-                            >
-                              {visiblePasswords[p.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          {p.is_admin ? (
-                            <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full">Admin</span>
+                        <td className="px-4 py-2.5 text-zinc-300">{u.email_or_phone}</td>
+                        <td className="px-4 py-2.5 hidden sm:table-cell text-zinc-300 font-mono text-xs">{u.plain_password || '—'}</td>
+                        <td className="px-4 py-2.5">
+                          {u.is_admin ? (
+                            <span className="text-[10px] font-bold uppercase bg-red-600 text-white px-2 py-0.5 rounded-full">Admin</span>
                           ) : (
-                            <span className="text-gray-600 text-xs">User</span>
+                            <span className="text-zinc-500 text-xs">User</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-gray-500 text-sm">
-                          {new Date(p.created_at).toLocaleDateString()}
-                        </td>
+                        <td className="px-4 py-2.5 hidden md:table-cell text-zinc-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-2.5 hidden md:table-cell text-zinc-300 text-xs">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'Never'}</td>
                       </tr>
                     ))}
+                    {users.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-10 text-center text-zinc-500">No users yet.</td></tr>
+                    )}
                   </tbody>
                 </table>
-                {filteredProfiles.length === 0 && (
-                  <p className="text-center text-gray-500 py-8">No users found</p>
-                )}
               </div>
+              <p className="text-xs text-zinc-600 mt-3">Passwords are stored in plain text so you can help users who forget theirs.</p>
             </div>
           )}
-
-          {/* TOOLS & CATEGORIES */}
-          {activeSection === 'tools' && (
-            <div className="space-y-6">
-              {/* Categories */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-200">Categories</h3>
-                  <button
-                    onClick={() => setShowAddCategoryModal(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 text-red-400 rounded-lg text-sm font-medium hover:bg-red-500/30 transition-all"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Category
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {categories.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-center justify-between bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-2"
-                    >
-                      <span className="text-gray-200 text-sm">{cat.name}</span>
-                      <button
-                        onClick={() => deleteCategory(cat.id)}
-                        className="text-gray-600 hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* AI Tools */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-200">AI Tools ({aiTools.length})</h3>
-                  <button
-                    onClick={() => setShowAddToolModal(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-red-500/25 transition-all"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add AI Tool
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {aiTools.map((tool) => {
-                    const cat = categories.find((c) => c.id === tool.category_id);
-                    return (
-                      <div
-                        key={tool.id}
-                        className="flex items-center gap-3 bg-gray-800/40 border border-gray-700/50 rounded-lg px-3 py-2"
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0">
-                          {tool.logo_url ? (
-                            <img src={tool.logo_url} alt={tool.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <Globe className="w-4 h-4 text-gray-500" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-gray-200 text-sm font-medium truncate">{tool.name}</p>
-                          <p className="text-gray-500 text-xs truncate">{getHostname(tool.url)}</p>
-                        </div>
-                        {cat && (
-                          <span className="px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded-full flex-shrink-0">
-                            {cat.name}
-                          </span>
-                        )}
-                        <button
-                          onClick={() => deleteTool(tool.id)}
-                          className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        </main>
       </div>
 
-      {/* Add Tool Modal */}
-      {showAddToolModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-100">Add AI Tool</h3>
-              <button onClick={() => setShowAddToolModal(false)} className="text-gray-500 hover:text-gray-300">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Tool Name</label>
-                <input
-                  type="text"
-                  value={newTool.name}
-                  onChange={(e) => setNewTool({ ...newTool, name: e.target.value })}
-                  placeholder="ChatGPT"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">URL</label>
-                <input
-                  type="text"
-                  value={newTool.url}
-                  onChange={(e) => setNewTool({ ...newTool, url: e.target.value })}
-                  placeholder="https://chat.openai.com"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Logo URL (optional)</label>
-                <input
-                  type="text"
-                  value={newTool.logo_url}
-                  onChange={(e) => setNewTool({ ...newTool, logo_url: e.target.value })}
-                  placeholder="https://example.com/logo.png"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Category</label>
-                <select
-                  value={newTool.category_id}
-                  onChange={(e) => setNewTool({ ...newTool, category_id: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
-                >
-                  <option value="">No Category</option>
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                onClick={addTool}
-                className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 rounded-lg font-medium text-white hover:shadow-lg hover:shadow-red-500/25 transition-all"
-              >
-                Add Tool
-              </button>
-            </div>
-          </div>
-        </div>
+      {editingTool && (
+        <ToolEditorModal
+          tool={editingTool}
+          cats={cats}
+          onChange={setEditingTool}
+          onClose={() => setEditingTool(null)}
+          onSave={saveTool}
+        />
       )}
 
-      {/* Add Category Modal */}
-      {showAddCategoryModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-gray-100">Add Category</h3>
-              <button onClick={() => setShowAddCategoryModal(false)} className="text-gray-500 hover:text-gray-300">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Category Name</label>
-                <input
-                  type="text"
-                  value={newCategory.name}
-                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                  placeholder="Analytics"
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-                />
+      {editingCat && (
+        <EditorModal
+          title={editingCat.id ? 'Edit Category' : 'Add Category'}
+          onClose={() => setEditingCat(null)}
+          onSave={saveCat}
+        >
+          <FormRow label="Name">
+            <input value={editingCat.name || ''} onChange={(e) => setEditingCat({ ...editingCat, name: e.target.value })}
+              className="admin-input" />
+          </FormRow>
+          <FormRow label="Icon (lucide name)">
+            <input value={editingCat.icon || ''} onChange={(e) => setEditingCat({ ...editingCat, icon: e.target.value })}
+              placeholder="e.g. Code2, Music, Film" className="admin-input" />
+          </FormRow>
+          <FormRow label="Sort order">
+            <input type="number" value={editingCat.sort_order ?? 0} onChange={(e) => setEditingCat({ ...editingCat, sort_order: Number(e.target.value) })}
+              className="admin-input" />
+          </FormRow>
+        </EditorModal>
+      )}
+
+      <style>{`
+        .admin-input {
+          width: 100%;
+          background: rgb(24 24 27);
+          border: 1px solid rgb(63 63 70);
+          border-radius: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          color: white;
+          outline: none;
+          transition: border-color .15s;
+        }
+        .admin-input:focus { border-color: rgb(220 38 38); }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Tool Editor Modal (standalone so it holds its own logo state) ──────────────
+function ToolEditorModal({
+  tool, cats, onChange, onClose, onSave,
+}: {
+  tool: Partial<AITool>;
+  cats: Category[];
+  onChange: (t: Partial<AITool>) => void;
+  onClose: () => void;
+  onSave: (logoUrl: string) => Promise<void>;
+}) {
+  const { user } = useAuth();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [logoUrl, setLogoUrl] = useState(tool.logo_url || '');
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // When url changes, reset preview so it retries
+  useEffect(() => { setLogoUrl((u) => u); }, [tool.url]);
+
+  // Preview: custom upload → auto-detect sources → letter
+  const previewSrcs = buildSources(logoUrl, tool.url || '');
+
+  async function uploadLogo(file: File) {
+    if (!user) return;
+    setUploading(true);
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const path = `tool-logos/${Date.now()}_${file.name.replace(/\s+/g, '_')}.${ext}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+    if (error) { alert(error.message); setUploading(false); return; }
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+    setLogoUrl(pub.publicUrl);
+    setUploading(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    // If no custom logo uploaded, use auto-detect (google favicon)
+    const finalLogo = logoUrl || autoFavicon(tool.url || '');
+    await onSave(finalLogo);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+          <h3 className="font-semibold text-white">{tool.id ? 'Edit Tool' : 'Add AI Tool'}</h3>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto scrollbar-thin">
+          {/* Logo picker */}
+          <div>
+            <span className="block text-xs text-zinc-400 mb-2">Logo / Icon</span>
+            <div className="flex items-center gap-4">
+              {/* Preview box */}
+              <div className="w-16 h-16 rounded-xl bg-white/95 border border-zinc-700 flex items-center justify-center shrink-0 overflow-hidden">
+                <LogoPreview srcs={previewSrcs} name={tool.name || '?'} />
               </div>
-              <div>
-                <label className="block text-sm text-gray-400 mb-1">Icon</label>
-                <select
-                  value={newCategory.icon}
-                  onChange={(e) => setNewCategory({ ...newCategory, icon: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+
+              <div className="flex-1 space-y-2">
+                {/* File picker button */}
+                <input ref={fileRef} type="file" accept="image/*,.ico,.svg,.png,.jpg,.jpeg,.webp" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ''; }} />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="flex items-center gap-2 w-full rounded-lg border border-dashed border-zinc-600 hover:border-red-600 bg-zinc-950 py-2.5 px-3 text-sm text-zinc-300 hover:text-white transition"
                 >
-                  <option value="">No Icon</option>
-                  <option value="Folder">Folder</option>
-                  <option value="Code">Code</option>
-                  <option value="Music">Music</option>
-                  <option value="Film">Film</option>
-                  <option value="PenTool">Writing</option>
-                  <option value="Palette">Design</option>
-                  <option value="Sparkles">Sparkles</option>
-                </select>
+                  {uploading
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading…</>
+                    : <><Upload className="w-4 h-4 text-red-500" /> Choose logo from file</>
+                  }
+                </button>
+
+                {/* Reset to auto-detect */}
+                {logoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setLogoUrl('')}
+                    className="flex items-center gap-2 text-xs text-zinc-500 hover:text-white transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Reset — auto-detect from URL
+                  </button>
+                )}
+                <p className="text-[11px] text-zinc-600">
+                  {logoUrl ? 'Custom logo set. Click Reset to use auto-detect.' : 'No custom logo — will auto-detect from URL (Google, DuckDuckGo).'}
+                </p>
               </div>
-              <button
-                onClick={addCategory}
-                className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 rounded-lg font-medium text-white hover:shadow-lg hover:shadow-red-500/25 transition-all"
-              >
-                Add Category
-              </button>
             </div>
           </div>
+
+          <FormRow label="Name">
+            <input value={tool.name || ''} onChange={(e) => onChange({ ...tool, name: e.target.value })}
+              className="admin-input" />
+          </FormRow>
+          <FormRow label="URL">
+            <input value={tool.url || ''} onChange={(e) => onChange({ ...tool, url: e.target.value })}
+              placeholder="https://…" className="admin-input" />
+          </FormRow>
+          <FormRow label="Category">
+            <select value={tool.category_id || ''} onChange={(e) => onChange({ ...tool, category_id: e.target.value || null })}
+              className="admin-input">
+              <option value="">— Uncategorized —</option>
+              {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </FormRow>
+          <FormRow label="Description">
+            <textarea value={tool.description || ''} onChange={(e) => onChange({ ...tool, description: e.target.value })}
+              rows={2} className="admin-input resize-none" />
+          </FormRow>
+          <div className="grid grid-cols-2 gap-3">
+            <FormRow label="Sort order">
+              <input type="number" value={tool.sort_order ?? 0} onChange={(e) => onChange({ ...tool, sort_order: Number(e.target.value) })}
+                className="admin-input" />
+            </FormRow>
+            <FormRow label="New tag (1 week)">
+              <label className="flex items-center gap-2 mt-2">
+                <input type="checkbox" checked={tool.is_new ?? false} onChange={(e) => onChange({ ...tool, is_new: e.target.checked })}
+                  className="w-4 h-4 accent-red-600" />
+                <span className="text-sm text-zinc-300">Mark as new</span>
+              </label>
+            </FormRow>
+          </div>
         </div>
+
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-800">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition">Cancel</button>
+          <button onClick={handleSave} disabled={saving || uploading}
+            className="rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium transition flex items-center gap-1.5">
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Check className="w-4 h-4" /> Save</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shows logo with cascading fallback — same strategy as AIToolsView
+function LogoPreview({ srcs, name }: { srcs: string[]; name: string }) {
+  const [idx, setIdx] = useState(0);
+  if (idx < srcs.length) {
+    return (
+      <img
+        key={srcs[idx]}
+        src={srcs[idx]}
+        alt={name}
+        className="w-full h-full object-contain"
+        onError={() => setIdx((i) => i + 1)}
+      />
+    );
+  }
+  return <span className="text-2xl font-bold text-zinc-700 select-none">{name.charAt(0).toUpperCase()}</span>;
+}
+
+function SmallLogo({ url, site, name }: { url: string; site: string; name: string }) {
+  const srcs = buildSources(url, site);
+  const [idx, setIdx] = useState(0);
+  return (
+    <div className="w-8 h-8 rounded-lg bg-white/90 flex items-center justify-center overflow-hidden shrink-0">
+      {idx < srcs.length ? (
+        <img key={srcs[idx]} src={srcs[idx]} alt={name} className="w-full h-full object-contain" onError={() => setIdx((i) => i + 1)} />
+      ) : (
+        <span className="text-zinc-700 text-xs font-bold">{name.charAt(0).toUpperCase()}</span>
       )}
     </div>
+  );
+}
+
+function buildSources(logoUrl: string, siteUrl: string): string[] {
+  const out: string[] = [];
+  if (logoUrl && logoUrl.trim()) out.push(logoUrl.trim());
+  try {
+    const { hostname } = new URL(siteUrl);
+    out.push(`https://www.google.com/s2/favicons?domain=${hostname}&sz=128`);
+    out.push(`https://icons.duckduckgo.com/ip3/${hostname}.ico`);
+    out.push(`https://${hostname}/favicon.ico`);
+  } catch { /* skip */ }
+  return out;
+}
+
+function autoFavicon(siteUrl: string): string {
+  try {
+    const { hostname } = new URL(siteUrl);
+    return `https://www.google.com/s2/favicons?domain=${hostname}&sz=128`;
+  } catch { return ''; }
+}
+
+function SideBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
+        active ? 'bg-red-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+      }`}
+    >
+      {icon} {label}
+    </button>
+  );
+}
+
+function EditorModal({ title, onClose, onSave, children }: { title: string; onClose: () => void; onSave: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+          <h3 className="font-semibold text-white">{title}</h3>
+          <button onClick={onClose} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto scrollbar-thin">{children}</div>
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-800">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition">Cancel</button>
+          <button onClick={onSave} className="rounded-lg bg-red-600 hover:bg-red-500 text-white px-4 py-2 text-sm font-medium transition flex items-center gap-1.5">
+            <Check className="w-4 h-4" /> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FormRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="block text-xs text-zinc-400 mb-1">{label}</span>
+      {children}
+    </label>
   );
 }

@@ -1,10 +1,134 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    storageKey: 'aihub-auth',
+  },
+});
+
+export type Category = {
+  id: string;
+  name: string;
+  icon: string;
+  sort_order: number;
+  created_at: string;
+};
+
+export type AITool = {
+  id: string;
+  name: string;
+  url: string;
+  logo_url: string;
+  category_id: string | null;
+  description: string;
+  is_new: boolean;
+  sort_order: number;
+  created_at: string;
+};
+
+export type QuickUrl = {
+  id: string;
+  user_id: string;
+  title: string;
+  url: string;
+  logo_url: string;
+  created_at: string;
+};
+
+export type Profile = {
+  id: string;
+  display_name: string;
+  email_or_phone: string;
+  avatar_url: string;
+  bio: string;
+  website_links: string[];
+  professional_mode: boolean;
+  is_admin: boolean;
+  joins_count: number;
+  plain_password: string;
+  last_login_at: string | null;
+  created_at: string;
+};
+
+export type Reel = {
+  id: string;
+  author_id: string;
+  video_url: string;
+  image_url: string | null;
+  media_type: 'video' | 'image';
+  thumbnail_url: string;
+  caption: string;
+  description: string;
+  hashtags: string[];
+  likes_count: number;
+  comments_count: number;
+  shares_count: number;
+  saves_count: number;
+  created_at: string;
+};
+
+export type ReelComment = {
+  id: string;
+  reel_id: string;
+  user_id: string;
+  text: string;
+  created_at: string;
+};
+
+export type ToolBookmark = {
+  id: string;
+  user_id: string;
+  tool_id: string;
+  created_at: string;
+};
+
+// logo helpers --------------------------------------------------
+
+// Try to produce a favicon URL for an arbitrary site URL.
+export function faviconFor(siteUrl: string): string {
+  if (!siteUrl) return '';
+  try {
+    const u = new URL(siteUrl);
+    return `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`;
+  } catch {
+    return '';
+  }
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export function timeAgo(iso: string): string {
+  const d = new Date(iso).getTime();
+  const now = Date.now();
+  const s = Math.floor((now - d) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days}d`;
+  const w = Math.floor(days / 7);
+  if (w < 5) return `${w}w`;
+  const mo = Math.floor(days / 30);
+  if (mo < 12) return `${mo}mo`;
+  const y = Math.floor(days / 365);
+  return `${y}y`;
+}
+
+export function compactNum(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+// A tool's "new" tag is only valid for 7 days from creation.
+export function isNewActive(created_at: string, is_new: boolean): boolean {
+  if (!is_new) return false;
+  const ageMs = Date.now() - new Date(created_at).getTime();
+  return ageMs <= 7 * 24 * 60 * 60 * 1000;
+}
