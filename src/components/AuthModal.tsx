@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Mail, Lock, User as UserIcon, ArrowLeft, KeyRound, CheckCircle2 } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, ArrowLeft, KeyRound, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
@@ -14,6 +14,9 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
   const [otp, setOtp] = useState('');
   const [newPass, setNewPass] = useState('');
   const [newPass2, setNewPass2] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showNewPass2, setShowNewPass2] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -196,14 +199,20 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
                 />
               </Field>
               <Field icon={<Lock className="w-4 h-4" />} label="Password">
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="auth-input"
-                  placeholder="••••••••"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showPass ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="auth-input pr-10"
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button type="button" onClick={() => setShowPass((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition">
+                    {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </Field>
               {mode === 'login' && (
                 <div className="flex justify-end">
@@ -293,24 +302,36 @@ export default function AuthModal({ onClose }: { onClose: () => void }) {
           {mode === 'reset' && (
             <form onSubmit={handleReset} className="space-y-3">
               <Field icon={<Lock className="w-4 h-4" />} label="New password">
-                <input
-                  type="password"
-                  value={newPass}
-                  onChange={(e) => setNewPass(e.target.value)}
-                  className="auth-input"
-                  placeholder="••••••••"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    value={newPass}
+                    onChange={(e) => setNewPass(e.target.value)}
+                    className="auth-input pr-10"
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button type="button" onClick={() => setShowNewPass((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition">
+                    {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </Field>
               <Field icon={<Lock className="w-4 h-4" />} label="Confirm new password">
-                <input
-                  type="password"
-                  value={newPass2}
-                  onChange={(e) => setNewPass2(e.target.value)}
-                  className="auth-input"
-                  placeholder="••••••••"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPass2 ? 'text' : 'password'}
+                    value={newPass2}
+                    onChange={(e) => setNewPass2(e.target.value)}
+                    className="auth-input pr-10"
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button type="button" onClick={() => setShowNewPass2((s) => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition">
+                    {showNewPass2 ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </Field>
               <button
                 type="submit"

@@ -56,6 +56,7 @@ export default function ProfileModal({
         setDisplayName(p.display_name || '');
         setBio(p.bio || '');
         setAvatarUrl(p.avatar_url || '');
+        setBannerUrl(p.banner_url || '');
         setLinks(p.website_links || []);
         setProfMode(p.professional_mode);
       }
@@ -76,7 +77,6 @@ export default function ProfileModal({
     if (error) { alert(error.message); setUploadingBanner(false); return; }
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
     setBannerUrl(pub.publicUrl);
-    localStorage.setItem('banner_' + user.id, pub.publicUrl);
     setUploadingBanner(false);
   }
 
@@ -97,12 +97,12 @@ export default function ProfileModal({
     setSaving(true);
     const { error } = await supabase
       .from('profiles')
-      .update({ display_name: displayName, bio, avatar_url: avatarUrl, website_links: links, professional_mode: profMode })
+      .update({ display_name: displayName, bio, avatar_url: avatarUrl, banner_url: bannerUrl, website_links: links, professional_mode: profMode })
       .eq('id', user.id);
     setSaving(false);
     if (error) { alert(error.message); return; }
     await refreshProfile();
-    setTarget((t) => t ? { ...t, display_name: displayName, bio, avatar_url: avatarUrl, website_links: links, professional_mode: profMode } : t);
+    setTarget((t) => t ? { ...t, display_name: displayName, bio, avatar_url: avatarUrl, banner_url: bannerUrl, website_links: links, professional_mode: profMode } : t);
     setEditing(false);
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 1500);
@@ -137,7 +137,7 @@ export default function ProfileModal({
 
   const gradient = 'linear-gradient(135deg, #b91c1c 0%, #dc2626 40%, #7f1d1d 100%)';
   const nameForDisplay = isOwn ? displayName : p.display_name;
-  const currentBanner = isOwn ? (bannerUrl || localStorage.getItem('banner_' + user.id) || '') : '';
+  const currentBanner = isOwn ? bannerUrl : (p?.banner_url || '');
   const currentAvatar = isOwn ? avatarUrl : p.avatar_url;
 
   return (

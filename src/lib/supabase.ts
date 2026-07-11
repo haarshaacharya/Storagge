@@ -46,6 +46,7 @@ export type Profile = {
   display_name: string;
   email_or_phone: string;
   avatar_url: string;
+  banner_url: string | null;
   bio: string;
   website_links: string[];
   professional_mode: boolean;
