@@ -160,14 +160,14 @@ export default function AdminPanel({ onExit }: { onExit: () => void }) {
               {loading ? (
                 <p className="text-zinc-500">Loading…</p>
               ) : (
-                <div className="rounded-xl border border-zinc-800 overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/20 overflow-hidden overflow-x-auto">
+                  <table className="w-full text-sm min-w-[600px]">
                     <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase">
                       <tr>
-                        <th className="text-left px-4 py-2.5">Tool</th>
-                        <th className="text-left px-4 py-2.5 hidden md:table-cell">Category</th>
-                        <th className="text-left px-4 py-2.5">New tag</th>
-                        <th className="text-right px-4 py-2.5">Actions</th>
+                        <th className="text-left px-4 py-3">Tool</th>
+                        <th className="text-left px-4 py-3 hidden md:table-cell">Category</th>
+                        <th className="text-left px-4 py-3 hidden sm:table-cell">New tag</th>
+                        <th className="text-right px-6 py-3 w-32">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -175,18 +175,18 @@ export default function AdminPanel({ onExit }: { onExit: () => void }) {
                         const cat = cats.find((c) => c.id === t.category_id);
                         const newActive = isNewActive(t.created_at, t.is_new);
                         return (
-                          <tr key={t.id} className="border-t border-zinc-800 hover:bg-zinc-900/50">
-                            <td className="px-4 py-2.5">
-                              <div className="flex items-center gap-2.5">
+                          <tr key={t.id} className="border-t border-zinc-800 hover:bg-zinc-900/50 transition-colors">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
                                 <SmallLogo url={t.logo_url} site={t.url} name={t.name} />
                                 <div className="min-w-0">
-                                  <p className="font-medium text-white truncate">{t.name}</p>
-                                  <p className="text-zinc-500 text-xs truncate">{t.url}</p>
+                                  <p className="font-semibold text-white truncate">{t.name}</p>
+                                  <p className="text-zinc-500 text-xs truncate max-w-[200px] sm:max-w-xs">{t.url}</p>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-4 py-2.5 hidden md:table-cell text-zinc-300">{cat?.name ?? '—'}</td>
-                            <td className="px-4 py-2.5">
+                            <td className="px-4 py-3 hidden md:table-cell text-zinc-400">{cat?.name ?? '—'}</td>
+                            <td className="px-4 py-3 hidden sm:table-cell">
                               {newActive ? (
                                 <span className="text-[10px] font-bold uppercase bg-red-600 text-white px-2 py-0.5 rounded-full">New</span>
                               ) : t.is_new ? (
@@ -195,16 +195,16 @@ export default function AdminPanel({ onExit }: { onExit: () => void }) {
                                 <span className="text-zinc-600">—</span>
                               )}
                             </td>
-                            <td className="px-4 py-2.5">
-                              <div className="flex items-center justify-end gap-1">
-                                <a href={t.url} target="_blank" rel="noopener noreferrer" className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400">
-                                  <ExternalLink className="w-3.5 h-3.5" />
+                            <td className="px-6 py-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <a href={t.url} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition" title="Open Link">
+                                  <ExternalLink className="w-4 h-4" />
                                 </a>
-                                <button onClick={() => setEditingTool(t)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
-                                  <Pencil className="w-3.5 h-3.5" />
+                                <button onClick={() => setEditingTool(t)} className="w-8 h-8 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition" title="Edit Tool">
+                                  <Pencil className="w-4 h-4" />
                                 </button>
-                                <button onClick={() => deleteTool(t.id)} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-red-400">
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                <button onClick={() => deleteTool(t.id)} className="w-8 h-8 rounded-md hover:bg-zinc-800 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-950/30 transition" title="Delete Tool">
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                             </td>
