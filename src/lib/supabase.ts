@@ -41,14 +41,34 @@ export type QuickUrl = {
   created_at: string;
 };
 
+export type SocialLink = {
+  platform: string;
+  url: string;
+  label?: string;
+};
+
+export type FavoriteReel = {
+  url: string;
+  title?: string;
+};
+
 export type Profile = {
   id: string;
   display_name: string;
+  full_name: string | null;
+  username: string | null;
   email_or_phone: string;
   avatar_url: string;
   banner_url: string | null;
   bio: string;
+  date_of_birth: string | null;
+  interests: string[];
+  favorite_reels: FavoriteReel[];
+  today_thought: string | null;
+  today_thought_song: string | null;
+  today_thought_user_ids: string[];
   website_links: string[];
+  social_links: SocialLink[];
   professional_mode: boolean;
   is_admin: boolean;
   joins_count: number;
@@ -67,6 +87,8 @@ export type Reel = {
   caption: string;
   description: string;
   hashtags: string[];
+  visibility: 'public' | 'private' | 'selected';
+  visibility_user_ids: string[];
   likes_count: number;
   comments_count: number;
   shares_count: number;
@@ -89,9 +111,64 @@ export type ToolBookmark = {
   created_at: string;
 };
 
+export type Event = {
+  id: string;
+  author_id: string;
+  title: string;
+  caption: string;
+  description: string;
+  hashtags: string[];
+  event_date: string | null;
+  location: string;
+  event_type: string;
+  image_url: string;
+  visibility: 'public' | 'private' | 'selected';
+  visibility_user_ids: string[];
+  likes_count: number;
+  saves_count: number;
+  created_at: string;
+};
+
+export type Conversation = {
+  id: string;
+  participant_a: string;
+  participant_b: string;
+  last_message_at: string | null;
+  created_at: string;
+};
+
+export type Message = {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  text: string;
+  seen: boolean;
+  created_at: string;
+};
+
+export type Thought = {
+  id: string;
+  author_id: string;
+  text: string;
+  song: string | null;
+  visibility_user_ids: string[];
+  likes_count: number;
+  created_at: string;
+};
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  actor_id: string;
+  type: 'follow' | 'like' | 'comment';
+  entity_id: string | null;
+  message: string;
+  seen: boolean;
+  created_at: string;
+};
+
 // logo helpers --------------------------------------------------
 
-// Try to produce a favicon URL for an arbitrary site URL.
 export function faviconFor(siteUrl: string): string {
   if (!siteUrl) return '';
   try {
@@ -132,4 +209,27 @@ export function isNewActive(created_at: string, is_new: boolean): boolean {
   if (!is_new) return false;
   const ageMs = Date.now() - new Date(created_at).getTime();
   return ageMs <= 7 * 24 * 60 * 60 * 1000;
+}
+
+// Get or create a conversation between two users (participant_a < participant_b)
+export async function getOrCreateConversation(userA: string, userB: string): Promise<string | null> {
+  const a = userA < userB ? userA : userB;
+  const b = userA < userB ? userB : userA;
+
+  const { data: existing } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('participant_a', a)
+    .eq('participant_b', b)
+    .maybeSingle();
+
+  if (existing) return existing.id;
+
+  const { data: created } = await supabase
+    .from('conversations')
+    .insert({ participant_a: a, participant_b: b })
+    .select('id')
+    .maybeSingle();
+
+  return created?.id ?? null;
 }

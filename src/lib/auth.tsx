@@ -8,7 +8,7 @@ type AuthState = {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
-  signUp: (email: string, password: string, displayName: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, displayName: string, extra?: Record<string, unknown>) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -76,14 +76,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [loadProfile]);
 
-  const signUp = useCallback(async (email: string, password: string, displayName: string) => {
+  const signUp = useCallback(async (email: string, password: string, displayName: string, extra?: Record<string, unknown>) => {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
     if (data.user) {
-      // best-effort: set display name + plain password so admin can help with resets
       await supabase
         .from('profiles')
-        .update({ display_name: displayName, plain_password: password })
+        .update({ display_name: displayName, plain_password: password, ...extra })
         .eq('id', data.user.id);
     }
     return { error: null };

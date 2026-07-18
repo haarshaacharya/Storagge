@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bookmark, BookmarkCheck, Sparkles, Search, Star } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Sparkles, Search } from 'lucide-react';
 import { supabase, type AITool, type Category, type ToolBookmark, isNewActive } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
@@ -25,7 +25,7 @@ export default function AIToolsView({ search }: { search: string }) {
       ]);
       setTools((t as AITool[]) ?? []);
       setCats((c as Category[]) ?? []);
-      // aggregate ratings
+      // aggregate global ratings (all users including anon)
       const rm: RatingMap = {};
       for (const row of (r as { tool_id: string; rating: number }[]) ?? []) {
         if (!rm[row.tool_id]) rm[row.tool_id] = { avg: 0, count: 0 };
@@ -78,22 +78,32 @@ export default function AIToolsView({ search }: { search: string }) {
   }
 
   async function rateTool(tool: AITool, stars: number) {
-    if (!user) { alert('Please sign up or log in to rate tools.'); return; }
-    const prev = myRatings[tool.id];
+    const prevMyR = myRatings[tool.id];
     setMyRatings((m) => ({ ...m, [tool.id]: stars }));
-    // upsert rating
-    const { error } = await supabase
-      .from('tool_ratings')
-      .upsert({ tool_id: tool.id, user_id: user.id, rating: stars }, { onConflict: 'tool_id,user_id' });
-    if (error) { setMyRatings((m) => ({ ...m, [tool.id]: prev })); return; }
-    // recompute aggregate locally
+
+    if (user) {
+      const { error } = await supabase
+        .from('tool_ratings')
+        .upsert({ tool_id: tool.id, user_id: user.id, rating: stars }, { onConflict: 'tool_id,user_id' });
+      if (error) { setMyRatings((m) => ({ ...m, [tool.id]: prevMyR })); return; }
+    } else {
+      // anonymous — insert without user_id
+      const { error } = await supabase
+        .from('tool_ratings')
+        .insert({ tool_id: tool.id, rating: stars });
+      if (error) { setMyRatings((m) => ({ ...m, [tool.id]: prevMyR })); return; }
+    }
+
+    // Recompute aggregate locally
     setRatings((prev) => {
       const existing = prev[tool.id];
       let avg: number, count: number;
       if (existing) {
+        const hadPrevRating = prevMyR != null;
         const oldTotal = existing.avg * existing.count;
-        const newTotal = prev ? oldTotal - (myRatings[tool.id] ?? 0) + stars : oldTotal + stars;
-        count = existing.count + (myRatings[tool.id] ? 0 : 1);
+        const removedOld = hadPrevRating ? prevMyR : 0;
+        const newTotal = oldTotal - removedOld + stars;
+        count = hadPrevRating ? existing.count : existing.count + 1;
         avg = newTotal / count;
       } else {
         avg = stars; count = 1;
@@ -104,7 +114,7 @@ export default function AIToolsView({ search }: { search: string }) {
 
   if (loading) {
     return (
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-40 rounded-2xl bg-zinc-900/60 animate-pulse" />)}
       </div>
     );
@@ -145,22 +155,65 @@ export default function AIToolsView({ search }: { search: string }) {
                 <h3 className="font-semibold text-white text-sm truncate pr-5">{tool.name}</h3>
                 <p className="text-xs text-zinc-500 line-clamp-2 mt-1 min-h-[2rem]">{tool.description}</p>
 
-                {/* Star rating */}
-                <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <button key={s} onClick={() => rateTool(tool, s)} className="p-0.5 hover:scale-110 transition" title={`Rate ${s} star${s > 1 ? 's' : ''}`}>
-                        <Star className={`w-3.5 h-3.5 ${(myR ?? 0) >= s ? 'fill-red-500 text-red-500' : (r && r.avg >= s) ? 'fill-red-500/50 text-red-500/50' : 'text-zinc-600'}`} />
-                      </button>
-                    ))}
-                  </div>
-                  {r && r.count > 0 && <span className="text-[10px] text-zinc-500 ml-0.5">({r.count})</span>}
+                {/* Global star rating with half-star support */}
+                <div className="flex items-center gap-1.5 mt-2" onClick={(e) => e.stopPropagation()}>
+                  <HalfStarRow avg={r?.avg ?? 0} myRating={myR ?? 0} onRate={(s) => rateTool(tool, s)} />
+                  {r && r.count > 0 && (
+                    <span className="text-[10px] text-zinc-500">
+                      {r.avg.toFixed(1)} ({r.count})
+                    </span>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// Half-star display + click-to-rate
+function HalfStarRow({ avg, myRating, onRate }: { avg: number; myRating: number; onRate: (s: number) => void }) {
+  const [hover, setHover] = useState(0);
+  // When hovering show hover value; when rated show myRating; otherwise show avg
+  const effective = hover > 0 ? hover : (myRating > 0 ? myRating : avg);
+
+  return (
+    <div className="flex items-center gap-0.5" onMouseLeave={() => setHover(0)}>
+      {[1, 2, 3, 4, 5].map((star) => {
+        const fullFill = effective >= star;
+        const halfFill = !fullFill && effective >= star - 0.5 && effective > 0;
+        // Color: my rated stars = bright red; global avg = dim red
+        const isMyRated = myRating > 0 && (hover > 0 ? hover >= star : myRating >= star);
+        return (
+          <button
+            key={star}
+            type="button"
+            title={`Rate ${star} star${star > 1 ? 's' : ''}`}
+            onMouseEnter={() => setHover(star)}
+            onClick={(e) => { e.stopPropagation(); onRate(star); }}
+            className="relative hover:scale-125 transition-transform"
+            style={{ width: 15, height: 15 }}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" className="text-zinc-700" fill="currentColor">
+              <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+            </svg>
+            {(fullFill || halfFill) && (
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                className="absolute inset-0"
+                fill={isMyRated ? '#ef4444' : '#ef444480'}
+                style={halfFill ? { clipPath: 'inset(0 50% 0 0)' } : {}}
+              >
+                <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+              </svg>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -217,11 +270,8 @@ function buildSources(logoUrl: string, siteUrl: string): string[] {
   if (logoUrl && logoUrl.trim()) out.push(logoUrl.trim());
   try {
     const { hostname } = new URL(siteUrl);
-    // Google favicon — most reliable, high-res
     out.push(`https://www.google.com/s2/favicons?domain=${hostname}&sz=128`);
-    // DuckDuckGo favicon — alternative CDN
     out.push(`https://icons.duckduckgo.com/ip3/${hostname}.ico`);
-    // Direct root favicon
     out.push(`https://${hostname}/favicon.ico`);
   } catch { /* skip */ }
   return out;

@@ -5,7 +5,11 @@ import Navbar, { type Tab } from './components/Navbar';
 import AuthModal from './components/AuthModal';
 import AIToolsView from './components/AIToolsView';
 import QuickURLsView, { getLatestQuickUrlTime } from './components/QuickURLsView';
-import ReelsView from './components/ReelsView';
+import PostsView from './components/PostsView';
+import EventsView from './components/EventsView';
+import MessagesView from './components/MessagesView';
+import NotificationsView, { getUnreadNotifCount } from './components/NotificationsView';
+import ConnectionsView from './components/ConnectionsView';
 import ProfileModal from './components/ProfileModal';
 import SavedDrawer from './components/SavedDrawer';
 import AdminPanel from './components/AdminPanel';
@@ -19,26 +23,24 @@ function Hub() {
   const [showProfile, setShowProfile] = useState(false);
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
+  const [showMessages, setShowMessages] = useState(false);
+  const [messageTo, setMessageTo] = useState<string | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
 
-  // notification dots: tracks unseen new tools / new urls / new reels since last view
-  const [dots, setDots] = useState({ tools: false, urls: false, reels: false });
+  const [dots, setDots] = useState({ tools: false, urls: false, posts: false, messages: false, notifications: false });
   const [seenToolsAt, setSeenToolsAt] = useState<number>(Number(localStorage.getItem('seenToolsAt') || Date.now()));
-  const [seenReelsAt, setSeenReelsAt] = useState<number>(Number(localStorage.getItem('seenReelsAt') || Date.now()));
+  const [seenPostsAt, setSeenPostsAt] = useState<number>(Number(localStorage.getItem('seenPostsAt') || Date.now()));
 
-  // Hidden admin entry: via #admin hash. Only the admin profile can actually use it.
   useEffect(() => {
     function checkHash() {
-      if (window.location.hash === '#admin') {
-        setAdminMode(true);
-      }
+      if (window.location.hash === '#admin') setAdminMode(true);
     }
     checkHash();
     window.addEventListener('hashchange', checkHash);
     return () => window.removeEventListener('hashchange', checkHash);
   }, []);
 
-  // New tools detection for red dot on Tools tab
   useEffect(() => {
     if (adminMode) return;
     let active = true;
@@ -57,7 +59,6 @@ function Hub() {
     return () => { active = false; };
   }, [seenToolsAt, adminMode]);
 
-  // New reels detection for red dot on Reels tab
   useEffect(() => {
     if (adminMode) return;
     let active = true;
@@ -69,12 +70,11 @@ function Hub() {
         .limit(1);
       if (!active || !data || data.length === 0) return;
       const newest = new Date((data as Reel[])[0].created_at).getTime();
-      setDots((d) => ({ ...d, reels: newest > seenReelsAt }));
+      setDots((d) => ({ ...d, posts: newest > seenPostsAt }));
     })();
     return () => { active = false; };
-  }, [seenReelsAt, adminMode]);
+  }, [seenPostsAt, adminMode]);
 
-  // Quick URLs dot: new since last visit (user-scoped, localStorage)
   useEffect(() => {
     if (adminMode || !user) { setDots((d) => ({ ...d, urls: false })); return; }
     const seenUrlsAt = Number(localStorage.getItem('seenUrlsAt') || Date.now());
@@ -82,25 +82,62 @@ function Hub() {
     setDots((d) => ({ ...d, urls: latest > seenUrlsAt }));
   }, [user, adminMode]);
 
+  // unread notifications dot
+  useEffect(() => {
+    if (!user) { setDots((d) => ({ ...d, notifications: false })); return; }
+    let active = true;
+    getUnreadNotifCount(user.id).then((count) => {
+      if (active) setDots((d) => ({ ...d, notifications: count > 0 }));
+    });
+    return () => { active = false; };
+  }, [user, showNotifications]);
+
+  // unread messages dot
+  useEffect(() => {
+    if (!user) { setDots((d) => ({ ...d, messages: false })); return; }
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('messages')
+        .select('id')
+        .neq('sender_id', user.id)
+        .eq('seen', false)
+        .limit(1);
+      if (!active) return;
+      setDots((d) => ({ ...d, messages: !!(data && data.length > 0) }));
+    })();
+    return () => { active = false; };
+  }, [user, showMessages]);
+
   const onTab = useCallback((t: Tab) => {
     setTab(t);
-    // clear dot when visiting
     if (t === 'tools') {
       const now = Date.now();
       setSeenToolsAt(now);
       localStorage.setItem('seenToolsAt', String(now));
       setDots((d) => ({ ...d, tools: false }));
-    } else if (t === 'reels') {
+    } else if (t === 'posts') {
       const now = Date.now();
-      setSeenReelsAt(now);
-      localStorage.setItem('seenReelsAt', String(now));
-      setDots((d) => ({ ...d, reels: false }));
+      setSeenPostsAt(now);
+      localStorage.setItem('seenPostsAt', String(now));
+      setDots((d) => ({ ...d, posts: false }));
     } else if (t === 'urls') {
       const now = Date.now();
       localStorage.setItem('seenUrlsAt', String(now));
       setDots((d) => ({ ...d, urls: false }));
     }
   }, []);
+
+  function openMessages(toUserId?: string) {
+    setMessageTo(toUserId ?? null);
+    setShowMessages(true);
+    setDots((d) => ({ ...d, messages: false }));
+  }
+
+  function openNotifications() {
+    setShowNotifications(true);
+    setDots((d) => ({ ...d, notifications: false }));
+  }
 
   if (adminMode) {
     if (loading) {
@@ -132,20 +169,59 @@ function Hub() {
         onOpenAuth={() => setShowAuth(true)}
         onOpenProfile={() => { setViewProfileId(null); setShowProfile(true); }}
         onOpenSaved={() => setShowSaved(true)}
+        onOpenMessages={() => openMessages()}
+        onOpenNotifications={openNotifications}
         dots={dots}
       />
 
       <main className="w-full px-4 py-6">
         {tab === 'tools' && <AIToolsView search={search} />}
         {tab === 'urls' && <QuickURLsView onOpenAuth={() => setShowAuth(true)} />}
-        {tab === 'reels' && <ReelsView onOpenAuth={() => setShowAuth(true)} onOpenProfile={(p) => { setViewProfileId(p.id); setShowProfile(true); }} />}
+        {tab === 'posts' && (
+          <PostsView
+            onOpenAuth={() => setShowAuth(true)}
+            onOpenProfile={(p) => { setViewProfileId(p.id); setShowProfile(true); }}
+            onMessage={(uid) => openMessages(uid)}
+          />
+        )}
+        {tab === 'connections' && (
+          <ConnectionsView
+            onOpenAuth={() => setShowAuth(true)}
+            onOpenProfile={(p) => { setViewProfileId(p.id); setShowProfile(true); }}
+          />
+        )}
+        {tab === 'events' && (
+          <EventsView
+            onOpenAuth={() => setShowAuth(true)}
+            onOpenProfile={(p) => { setViewProfileId(p.id); setShowProfile(true); }}
+          />
+        )}
       </main>
 
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
-      {showProfile && user && <ProfileModal onClose={() => setShowProfile(false)} profileId={viewProfileId} onOpenAdmin={() => { setShowProfile(false); setAdminMode(true); window.location.hash = 'admin'; }} />}
+      {showProfile && user && (
+        <ProfileModal
+          onClose={() => setShowProfile(false)}
+          profileId={viewProfileId}
+          onOpenAdmin={() => { setShowProfile(false); setAdminMode(true); window.location.hash = 'admin'; }}
+          onMessage={(uid) => { setShowProfile(false); openMessages(uid); }}
+        />
+      )}
       {showSaved && user && <SavedDrawer onClose={() => setShowSaved(false)} />}
+      {showMessages && user && (
+        <MessagesView
+          onClose={() => setShowMessages(false)}
+          initialUserId={messageTo}
+          onOpenProfile={(p) => { setShowMessages(false); setViewProfileId(p.id); setShowProfile(true); }}
+        />
+      )}
+      {showNotifications && user && (
+        <NotificationsView
+          onClose={() => setShowNotifications(false)}
+          onOpenProfile={(p) => { setShowNotifications(false); setViewProfileId(p.id); setShowProfile(true); }}
+        />
+      )}
 
-      {/* Footer hint for admin */}
       {profile?.is_admin && (
         <button
           onClick={() => { setAdminMode(true); window.location.hash = 'admin'; }}

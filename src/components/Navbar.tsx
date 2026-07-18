@@ -1,7 +1,7 @@
-import { Search, Sparkles, Link2, Clapperboard, User as UserIcon, LogOut, Bookmark } from 'lucide-react';
+import { Search, Sparkles, Link2, Clapperboard, User as UserIcon, Bookmark, MessageCircle, CalendarDays, Bell, Users } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
-export type Tab = 'tools' | 'urls' | 'reels';
+export type Tab = 'tools' | 'urls' | 'posts' | 'events' | 'connections';
 
 type Props = {
   tab: Tab;
@@ -11,37 +11,39 @@ type Props = {
   onOpenAuth: () => void;
   onOpenProfile: () => void;
   onOpenSaved: () => void;
-  dots: { tools: boolean; urls: boolean; reels: boolean };
+  onOpenMessages: () => void;
+  onOpenNotifications: () => void;
+  dots: { tools: boolean; urls: boolean; posts: boolean; messages: boolean; notifications: boolean };
 };
 
 export default function Navbar({
-  tab, onTab, search, onSearch, onOpenAuth, onOpenProfile, onOpenSaved, dots,
+  tab, onTab, search, onSearch, onOpenAuth, onOpenProfile, onOpenSaved, onOpenMessages, onOpenNotifications, dots,
 }: Props) {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile } = useAuth();
 
   return (
-    <header className="sticky top-0 z-50 bg-zinc-950/90 backdrop-blur-xl border-b border-zinc-800">
-      <div className="w-full px-4 h-16 flex items-center gap-3">
-        {/* Logo */}
+    <header className="sticky top-0 z-50 bg-zinc-950/90 backdrop-blur-x1 border-b border-zinc-800">
+    <div className="w-full px-4 h-16 flex items-center gap-3">
 
-       <div className="flex items-center gap-3 shrink-0">
-       <img
-        src="/drstoragge.png"
-        alt="DrStoragge"
-        className="h-36 w-auto object-contain mt-4"
-         />
-       </div>
+      {/* Logo */}
+
+      <div className="flex items-center gap-3 shrink-0">
+      <img src="/drstoragge.png" alt="DrStoragge" className="h-36 w-auto object-contain mt-4"/> 
+
+     </div>
 
         {/* Center tabs */}
-        <div className="flex-1 flex justify-center">
-          <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-full p-1">
+        <div className="flex-1 flex justify-center overflow-x-auto">
+          <nav className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800 rounded-full p-1 shrink-0">
             <TabBtn active={tab === 'tools'} onClick={() => onTab('tools')} dot={dots.tools} icon={<Sparkles className="w-4 h-4" />} label="AI Tools" />
             <TabBtn active={tab === 'urls'} onClick={() => onTab('urls')} dot={dots.urls} icon={<Link2 className="w-4 h-4" />} label="Quick URLs" />
-            <TabBtn active={tab === 'reels'} onClick={() => onTab('reels')} dot={dots.reels} icon={<Clapperboard className="w-4 h-4" />} label="Reels" />
+            <TabBtn active={tab === 'posts'} onClick={() => onTab('posts')} dot={dots.posts} icon={<Clapperboard className="w-4 h-4" />} label="Posts" />
+            <TabBtn active={tab === 'connections'} onClick={() => onTab('connections')} dot={false} icon={<Users className="w-4 h-4" />} label="Connects" />
+            <TabBtn active={tab === 'events'} onClick={() => onTab('events')} dot={false} icon={<CalendarDays className="w-4 h-4" />} label="Events" />
           </nav>
         </div>
 
-        {/* Right: search (only on tools) + auth */}
+        {/* Right: search + auth */}
         <div className="flex items-center gap-2 shrink-0">
           {tab === 'tools' && (
             <div className="hidden md:flex items-center relative">
@@ -57,6 +59,26 @@ export default function Navbar({
 
           {user ? (
             <div className="flex items-center gap-2">
+              <button
+                onClick={onOpenNotifications}
+                title="Notifications"
+                className="relative w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 hover:text-red-400 hover:border-red-700 transition"
+              >
+                <Bell className="w-4 h-4" />
+                {dots.notifications && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-zinc-950 animate-pulse" />
+                )}
+              </button>
+              <button
+                onClick={onOpenMessages}
+                title="Messages"
+                className="relative w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 hover:text-red-400 hover:border-red-700 transition"
+              >
+                <MessageCircle className="w-4 h-4" />
+                {dots.messages && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-zinc-950 animate-pulse" />
+                )}
+              </button>
               <button
                 onClick={onOpenSaved}
                 title="Saved"
@@ -75,13 +97,6 @@ export default function Navbar({
                     {(profile?.display_name || user.email || 'U').charAt(0).toUpperCase()}
                   </div>
                 )}
-              </button>
-              <button
-                onClick={signOut}
-                title="Log out"
-                className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 hover:text-red-400 hover:border-red-700 transition"
-              >
-                <LogOut className="w-4 h-4" />
               </button>
             </div>
           ) : (
