@@ -377,6 +377,7 @@ function ChatArea({
         .eq('conversation_id', conv.id)
         .neq('sender_id', user.id)
         .eq('seen', false);
+        onConversationUpdate();
     })();
   }, [conv.id, user]);
 
