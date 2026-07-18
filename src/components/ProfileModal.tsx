@@ -545,15 +545,6 @@ export default function ProfileModal({
               </div>
             </div>
 
-            {/* Today's Thought */}
-            <div>
-              <label className="block text-xs text-zinc-400 mb-2">Today's Thought</label>
-              <textarea value={todayThought} onChange={(e) => setTodayThought(e.target.value)} rows={2} placeholder="Share a thought for today…"
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-red-600 outline-none resize-none" />
-              <input value={todayThoughtSong} onChange={(e) => setTodayThoughtSong(e.target.value)} placeholder="Song / vibe (optional)"
-                className="w-full mt-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-red-600 outline-none" />
-            </div>
-
             {/* Social links */}
             <div>
               <label className="block text-xs text-zinc-400 mb-2">Social Links</label>
