@@ -382,8 +382,17 @@ function ChatArea({
   }, [conv.id, user]);
 
   // Scroll to bottom on new messages
+  // Scroll to bottom — instantly on chat open, smoothly on new messages
+  const isFirstLoadRef = useRef(true);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    isFirstLoadRef.current = true;
+  }, [conv.id]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    bottomRef.current?.scrollIntoView({ behavior: isFirstLoadRef.current ? 'auto' : 'smooth' });
+    isFirstLoadRef.current = false;
   }, [messages]);
 
   // Realtime subscription
