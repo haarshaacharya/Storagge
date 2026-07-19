@@ -355,8 +355,14 @@ export default function ProfileModal({
     const next = !isFollowing;
     setIsFollowing(next);
     setJoining((j) => Math.max(0, j + (next ? 1 : -1)));
-    if (next) await supabase.from('follows').insert({ follower_id: user.id, following_id: target.id });
-    else await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', target.id);
+    setTarget((t) => t ? { ...t, joins_count: Math.max(0, t.joins_count + (next ? 1 : -1)) } : t);
+    if (next) {
+      await supabase.from('follows').insert({ follower_id: user.id, following_id: target.id });
+      await supabase.rpc('increment_joins', { uid: target.id });
+    } else {
+      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', target.id);
+      await supabase.rpc('decrement_joins', { uid: target.id });
+    }
   }
 
   async function blockUser() {
