@@ -221,12 +221,12 @@ function timeSince(iso: string): string {
 
 function BarChart({ data, max, colorFrom, colorTo }: { data: { label: string; count: number }[]; max: number; colorFrom: string; colorTo: string }) {
   return (
-    <div className="flex items-end justify-between gap-2 h-40 mt-4">
+    <div className="flex items-stretch justify-between gap-2 h-40 mt-4">
       {data.map((d, i) => (
         <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
           <span className="text-xs text-zinc-400">{d.count}</span>
-          <div className="w-full bg-zinc-800 rounded-t-md relative flex-1 flex items-end">
-            <div className={`w-full bg-gradient-to-t ${colorFrom} ${colorTo} rounded-t-md transition-all`} style={{ height: `${(d.count / max) * 100}%` }} />
+          <div className="w-full bg-zinc-800 rounded-t-md relative flex-1 flex items-end overflow-hidden">
+            <div className={`w-full bg-gradient-to-t ${colorFrom} ${colorTo} rounded-t-md transition-all`} style={{ height: `${Math.max(2, (d.count / max) * 100)}%` }} />
           </div>
           <span className="text-xs text-zinc-500">{d.label}</span>
         </div>
