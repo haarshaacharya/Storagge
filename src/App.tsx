@@ -17,14 +17,26 @@ import { Sparkles } from 'lucide-react';
 
 function Hub() {
   const { user, profile, loading } = useAuth();
-  const [tab, setTab] = useState<Tab>('tools');
+  
+  // Tab ko sessionStorage se initialize karein taaki refresh par wahi rahe
+  const [tab, setTab] = useState<Tab>(() => {
+    return (sessionStorage.getItem('active_tab') as Tab) || 'tools';
+  });
+  
   const [search, setSearch] = useState('');
   const [showAuth, setShowAuth] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
-  const [showMessages, setShowMessages] = useState(false);
-  const [messageTo, setMessageTo] = useState<string | null>(null);
+  
+  // Messages modal aur user ko bhi sessionStorage mein save karein
+  const [showMessages, setShowMessages] = useState<boolean>(() => {
+    return sessionStorage.getItem('show_messages') === 'true';
+  });
+  const [messageTo, setMessageTo] = useState<string | null>(() => {
+    return sessionStorage.getItem('message_to');
+  });
+
   const [showNotifications, setShowNotifications] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
 
@@ -111,6 +123,7 @@ function Hub() {
 
   const onTab = useCallback((t: Tab) => {
     setTab(t);
+    sessionStorage.setItem('active_tab', t);
     if (t === 'tools') {
       const now = Date.now();
       setSeenToolsAt(now);
@@ -129,9 +142,23 @@ function Hub() {
   }, []);
 
   function openMessages(toUserId?: string) {
-    setMessageTo(toUserId ?? null);
+    const targetId = toUserId ?? null;
+    setMessageTo(targetId);
     setShowMessages(true);
+    sessionStorage.setItem('show_messages', 'true');
+    if (targetId) {
+      sessionStorage.setItem('message_to', targetId);
+    } else {
+      sessionStorage.removeItem('message_to');
+    }
     setDots((d) => ({ ...d, messages: false }));
+  }
+
+  function closeMessages() {
+    setShowMessages(false);
+    setMessageTo(null);
+    sessionStorage.removeItem('show_messages');
+    sessionStorage.removeItem('message_to');
   }
 
   function openNotifications() {
@@ -210,7 +237,7 @@ function Hub() {
       {showSaved && user && <SavedDrawer onClose={() => setShowSaved(false)} />}
       {showMessages && user && (
         <MessagesView
-          onClose={() => setShowMessages(false)}
+          onClose={closeMessages}
           initialUserId={messageTo}
           onOpenProfile={(p) => { setShowMessages(false); setViewProfileId(p.id); setShowProfile(true); }}
         />

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Send, Search, ArrowLeft, MessageCircle, Lock, Plus, Image as ImageIcon, Film, FileText, Paperclip } from 'lucide-react';
+import { X, Send, Search, ArrowLeft, MessageCircle, Lock, Plus, Image as ImageIcon, Film, FileText, Paperclip, Loader2, RotateCw } from 'lucide-react';
 import { supabase, type Conversation, type Message, type Profile, timeAgo, getOrCreateConversation } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 
-type MessageWithMedia = Message & { media_url?: string | null; media_type?: string | null };
+type MsgStatus = 'sending' | 'sent' | 'failed';
+type MessageWithMedia = Message & { media_url?: string | null; media_type?: string | null; _status?: MsgStatus };
 
 type ConvWithOther = Conversation & { other: Profile; lastMsg?: string; unread?: number };
 
@@ -22,7 +23,12 @@ export default function MessagesView({
 }) {
   const { user } = useAuth();
   const [convs, setConvs] = useState<ConvWithOther[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  
+  // Session storage se activeConvId restore karna taaki refresh par reset na ho
+  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
+    return sessionStorage.getItem('active_conv_id') || null;
+  });
+
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
@@ -34,6 +40,15 @@ export default function MessagesView({
   const [isResizing, setIsResizing] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Active conversation change hone par sessionStorage me save karna
+  useEffect(() => {
+    if (activeConvId) {
+      sessionStorage.setItem('active_conv_id', activeConvId);
+    } else {
+      sessionStorage.removeItem('active_conv_id');
+    }
+  }, [activeConvId]);
 
   useEffect(() => {
     function check() { setIsDesktop(window.innerWidth >= 768); }
@@ -115,7 +130,7 @@ export default function MessagesView({
     loadConversations();
   }, [loadConversations]);
 
-  // Open conversation with initialUserId
+  // Open conversation with initialUserId (agar props se mila ho toh priority use ko denge)
   useEffect(() => {
     if (!initialUserId || !user) return;
     (async () => {
@@ -169,7 +184,7 @@ export default function MessagesView({
         >
           {/* Header */}
           <div className="flex items-center gap-3 px-4 py-4 border-b border-zinc-800">
-            <button onClick={onClose} className="text-zinc-400 hover:text-white transition">
+            <button onClick={() => { sessionStorage.removeItem('active_conv_id'); onClose(); }} className="text-zinc-400 hover:text-white transition">
               <X className="w-5 h-5" />
             </button>
             <h2 className="font-bold text-white text-lg flex-1">Messages</h2>
@@ -311,7 +326,6 @@ function ChatArea({
   const [sending, setSending] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [pendingMedia, setPendingMedia] = useState<{ file: File; preview: string; type: 'image' | 'video' | 'document' } | null>(null);
-  const [uploadingMedia, setUploadingMedia] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -377,12 +391,10 @@ function ChatArea({
         .eq('conversation_id', conv.id)
         .neq('sender_id', user.id)
         .eq('seen', false);
-        onConversationUpdate();
+      onConversationUpdate();
     })();
-  }, [conv.id, user]);
+  }, [conv.id, user, onConversationUpdate]);
 
-  // Scroll to bottom on new messages
-  // Scroll to bottom — instantly on chat open, smoothly on new messages
   const isFirstLoadRef = useRef(true);
 
   useEffect(() => {
@@ -395,7 +407,6 @@ function ChatArea({
     isFirstLoadRef.current = false;
   }, [messages]);
 
-  // Realtime subscription
   useEffect(() => {
     const channel = supabase
       .channel(`messages:${conv.id}`)
@@ -403,10 +414,10 @@ function ChatArea({
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as MessageWithMedia]);
-          if ((payload.new as Message).sender_id !== user?.id) {
-            supabase.from('messages').update({ seen: true }).eq('id', payload.new.id).then(() => {});
-          }
+          const incoming = payload.new as MessageWithMedia;
+          if (incoming.sender_id === user?.id) return;
+          setMessages((prev) => (prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]));
+          supabase.from('messages').update({ seen: true }).eq('id', incoming.id).then(() => {});
           onConversationUpdate();
         }
       )
@@ -414,40 +425,80 @@ function ChatArea({
     return () => { supabase.removeChannel(channel); };
   }, [conv.id, user?.id, onConversationUpdate]);
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    if ((!text.trim() && !pendingMedia) || !user || sending || !canMessage) return;
-    setSending(true);
-    const msg = text.trim();
-    setText('');
+  async function insertMessage(tempId: string, msgText: string, mediaFile: File | null, mediaKind: 'image' | 'video' | 'document' | null, alreadyUploadedUrl?: string | null) {
+    if (!user) return;
 
-    let media_url: string | null = null;
-    let media_type: string | null = null;
+    let media_url: string | null = alreadyUploadedUrl ?? null;
+    let media_type: string | null = alreadyUploadedUrl ? mediaKind : null;
 
-    if (pendingMedia) {
-      setUploadingMedia(true);
-      const ext = pendingMedia.file.name.split('.').pop()?.toLowerCase() || 'bin';
+    if (mediaFile && !alreadyUploadedUrl) {
+      const ext = mediaFile.name.split('.').pop()?.toLowerCase() || 'bin';
       const path = `${conv.id}/${user.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('message-media').upload(path, pendingMedia.file, { contentType: pendingMedia.file.type });
-      if (!upErr) {
-        const { data: pub } = supabase.storage.from('message-media').getPublicUrl(path);
-        media_url = pub.publicUrl;
-        media_type = pendingMedia.type;
+      const { error: upErr } = await supabase.storage.from('message-media').upload(path, mediaFile, { contentType: mediaFile.type });
+      if (upErr) {
+        setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+        return;
       }
-      removePendingMedia();
-      setUploadingMedia(false);
+      const { data: pub } = supabase.storage.from('message-media').getPublicUrl(path);
+      media_url = pub.publicUrl;
+      media_type = mediaKind;
     }
 
-    const { error } = await supabase.from('messages').insert({
+    const { data, error } = await supabase.from('messages').insert({
       conversation_id: conv.id,
       sender_id: user.id,
-      text: msg || (media_type === 'document' ? pendingMedia?.file.name ?? '' : ''),
+      text: msgText || (media_type === 'document' ? mediaFile?.name ?? '' : ''),
       media_url,
       media_type,
-    });
-    if (error) { console.warn('Message send error:', error.message); setText(msg); }
+    }).select().single();
+
+    if (error || !data) {
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, _status: 'failed' } : m)));
+      return;
+    }
+
+    setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...(data as MessageWithMedia), _status: 'sent' } : m)));
+    onConversationUpdate();
+  }
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if ((!text.trim() && !pendingMedia) || !user || !canMessage) return;
+
+    const msgText = text.trim();
+    const media = pendingMedia;
+    setText('');
+    setPendingMedia(null);
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticMsg: MessageWithMedia = {
+      id: tempId,
+      conversation_id: conv.id,
+      sender_id: user.id,
+      text: msgText || (media?.type === 'document' ? media.file.name : ''),
+      media_url: media ? media.preview : null,
+      media_type: media ? media.type : null,
+      seen: false,
+      created_at: new Date().toISOString(),
+      _status: 'sending',
+    } as MessageWithMedia;
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setSending(true);
+
+    await insertMessage(tempId, msgText, media?.file ?? null, media?.type ?? null);
+
+    if (media?.preview) URL.revokeObjectURL(media.preview);
+
     setSending(false);
     inputRef.current?.focus();
+  }
+
+  async function retrySend(msg: MessageWithMedia) {
+    if (!user) return;
+    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, _status: 'sending' } : m)));
+    const alreadyUploaded = msg.media_url && !msg.media_url.startsWith('blob:') ? msg.media_url : null;
+    await insertMessage(msg.id, msg.text, null, (msg.media_type as 'image' | 'video' | 'document' | null) ?? null, alreadyUploaded);
   }
 
   return (
@@ -492,6 +543,8 @@ function ChatArea({
           messages.map((msg) => {
             const isOwn = msg.sender_id === user?.id;
             const m = msg as MessageWithMedia;
+            const failed = m._status === 'failed';
+            const isSending = m._status === 'sending';
             return (
               <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
                 {!isOwn && (
@@ -507,16 +560,16 @@ function ChatArea({
                 )}
                 <div className={`max-w-[70%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                   {m.media_url && m.media_type === 'image' && (
-                    <a href={m.media_url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-zinc-700">
+                    <a href={m.media_url} target="_blank" rel="noopener noreferrer" className={`block rounded-xl overflow-hidden border border-zinc-700 ${isSending ? 'opacity-60' : ''}`}>
                       <img src={m.media_url} alt="attachment" className="max-w-[240px] max-h-60 object-cover" />
                     </a>
                   )}
                   {m.media_url && m.media_type === 'video' && (
-                    <video src={m.media_url} controls className="max-w-[240px] max-h-60 rounded-xl border border-zinc-700" />
+                    <video src={m.media_url} controls className={`max-w-[240px] max-h-60 rounded-xl border border-zinc-700 ${isSending ? 'opacity-60' : ''}`} />
                   )}
                   {m.media_url && m.media_type === 'document' && (
                     <a href={m.media_url} target="_blank" rel="noopener noreferrer"
-                      className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm border ${isOwn ? 'bg-red-700 border-red-500 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-100'}`}>
+                      className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm border ${isOwn ? 'bg-red-700 border-red-500 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-100'} ${isSending ? 'opacity-60' : ''}`}>
                       <FileText className="w-4 h-4 shrink-0" />
                       <span className="truncate max-w-[160px]">{msg.text || 'Document'}</span>
                     </a>
@@ -524,11 +577,26 @@ function ChatArea({
                   {msg.text && !(m.media_type === 'document' && m.media_url) && (
                     <div className={`rounded-2xl px-4 py-2.5 text-sm break-words ${
                       isOwn ? 'bg-red-600 text-white rounded-br-md' : 'bg-zinc-800 text-zinc-100 rounded-bl-md'
-                    }`}>
+                    } ${isSending ? 'opacity-70' : ''}`}>
                       {msg.text}
                     </div>
                   )}
-                  <span className="text-[10px] text-zinc-600 px-1">{timeAgo(msg.created_at)}</span>
+
+                  <span className="text-[10px] text-zinc-600 px-1 flex items-center gap-1">
+                    {isSending && (
+                      <><Loader2 className="w-2.5 h-2.5 animate-spin" /> Sending…</>
+                    )}
+                    {failed && (
+                      <button
+                        type="button"
+                        onClick={() => retrySend(m)}
+                        className="flex items-center gap-1 text-red-400 hover:text-red-300 transition"
+                      >
+                        <RotateCw className="w-2.5 h-2.5" /> Failed — tap to retry
+                      </button>
+                    )}
+                    {!isSending && !failed && `${timeAgo(msg.created_at)} ago`}
+                  </span>
                 </div>
               </div>
             );
@@ -545,7 +613,6 @@ function ChatArea({
         </div>
       ) : (
         <div className="border-t border-zinc-800 bg-zinc-950 shrink-0">
-          {/* Pending media preview */}
           {pendingMedia && (
             <div className="px-4 pt-3 flex items-center gap-2">
               {pendingMedia.type === 'image' && <img src={pendingMedia.preview} alt="" className="h-16 w-16 rounded-lg object-cover border border-zinc-700" />}
@@ -562,10 +629,8 @@ function ChatArea({
             </div>
           )}
           <form onSubmit={send} className="px-4 py-3 flex gap-2 items-center">
-            {/* Hidden file input */}
             <input ref={fileRef} type="file" className="hidden" onChange={handleFileChange} />
 
-            {/* Attachment button (left side) */}
             <div ref={attachMenuRef} className="relative shrink-0">
               <button
                 type="button"
@@ -604,10 +669,10 @@ function ChatArea({
             />
             <button
               type="submit"
-              disabled={(!text.trim() && !pendingMedia) || sending || uploadingMedia || canMessage === null || !canMessage}
+              disabled={(!text.trim() && !pendingMedia) || sending || canMessage === null || !canMessage}
               className="w-10 h-10 rounded-full bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white flex items-center justify-center transition shrink-0"
             >
-              {(sending || uploadingMedia) ? <div className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
+              <Send className="w-4 h-4" />
             </button>
           </form>
         </div>
