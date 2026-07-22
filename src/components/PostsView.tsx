@@ -394,6 +394,12 @@ function ThoughtCard({
         )}
       </div>
 
+      {thought.image_url && (
+        <div className="px-4 pb-3">
+          <img src={thought.image_url} alt="" className="w-full rounded-xl object-cover max-h-80 border border-zinc-800" />
+        </div>
+      )}
+
       {/* Like */}
       <div className="flex items-center gap-2 px-4 pb-4 border-t border-zinc-800 pt-3">
         <button onClick={onLike} className={`flex items-center gap-1.5 text-sm transition ${liked ? 'text-red-500' : 'text-zinc-500 hover:text-red-400'}`}>
@@ -416,20 +422,53 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function pickImage(f: File | null) {
+    if (!f) return;
+    if (!f.type.startsWith('image/')) { setErr('Please select an image file'); return; }
+    setImageFile(f);
+    setImagePreview(URL.createObjectURL(f));
+    setErr(null);
+  }
+
+  function removeImage() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview(null);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!text.trim() || !user) { setErr('Write something first'); return; }
     if (selectedIds.size === 0) { setErr('Select at least one person to share with'); return; }
     setBusy(true);
+
+    let image_url: string | null = null;
+    if (imageFile) {
+      setUploadingImage(true);
+      const ext = imageFile.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${user.id}/thought_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, imageFile, { contentType: imageFile.type });
+      setUploadingImage(false);
+      if (upErr) { setErr(upErr.message); setBusy(false); return; }
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path);
+      image_url = pub.publicUrl;
+    }
+
     const { error } = await supabase.from('thoughts').insert({
       author_id: user.id,
       text: text.trim(),
       song: song.trim() || null,
+      image_url,
       visibility_user_ids: Array.from(selectedIds),
     });
     setBusy(false);
     if (error) { setErr(error.message); return; }
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     onPosted();
   }
 
@@ -442,13 +481,31 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
           </h2>
           <button onClick={onClose} className="text-zinc-400 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
-        <form onSubmit={submit} className="p-6 space-y-4">
+        <form onSubmit={submit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto scrollbar-thin">
           {err && <div className="text-sm text-red-300 bg-red-950/50 border border-red-800 rounded-lg px-3 py-2">{err}</div>}
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Your thought</label>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
               placeholder="What's on your mind…"
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-red-600 outline-none resize-none" />
+          </div>
+          <div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) pickImage(f); e.target.value = ''; }} />
+            {imagePreview ? (
+              <div className="relative rounded-xl overflow-hidden border border-zinc-800">
+                <img src={imagePreview} alt="preview" className="w-full max-h-48 object-cover" />
+                <button type="button" onClick={removeImage}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => fileRef.current?.click()}
+                className="flex items-center gap-2 w-full rounded-lg border border-dashed border-zinc-700 hover:border-red-600 bg-zinc-950 py-2.5 px-3 text-sm text-zinc-300 hover:text-white transition">
+                <ImageIcon className="w-4 h-4 text-red-500" /> Add a photo (optional)
+              </button>
+            )}
           </div>
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Song / vibe (optional)</label>
@@ -461,13 +518,11 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Who can see this?</label>
             <p className="text-xs text-zinc-600 mb-2">Select specific followers — only they will see your thought</p>
-            <FollowerPicker selectedIds={selectedIds} onToggle={(id) => setSelectedIds((prev) => {
-              const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
-            })} />
+            <FollowerPicker selectedIds={selectedIds} onChange={setSelectedIds} />
           </div>
-          <button type="submit" disabled={busy || !text.trim()}
+          <button type="submit" disabled={busy || uploadingImage || !text.trim()}
             className="w-full rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium py-3 transition flex items-center justify-center gap-2">
-            {busy ? <><div className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full animate-spin" /> Posting…</> : <><Send className="w-4 h-4" /> Post Thought</>}
+            {(busy || uploadingImage) ? <><div className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full animate-spin" /> Posting…</> : <><Send className="w-4 h-4" /> Post Thought</>}
           </button>
         </form>
       </div>
@@ -1037,10 +1092,10 @@ function PrivacySelector({ value, onChange }: { value: Visibility; onChange: (v:
 
 // ── Follower Picker ───────────────────────────────────────────────
 function FollowerPicker({
-  selectedIds, onToggle,
+  selectedIds, onChange,
 }: {
   selectedIds: Set<string>;
-  onToggle: (id: string) => void;
+  onChange: (next: Set<string>) => void;
 }) {
   const { user } = useAuth();
   const [followers, setFollowers] = useState<Profile[]>([]);
@@ -1068,6 +1123,22 @@ function FollowerPicker({
     return (p.display_name || '').toLowerCase().includes(q) || (p.username || '').toLowerCase().includes(q);
   });
 
+  function toggleOne(id: string) {
+    const n = new Set(selectedIds);
+    n.has(id) ? n.delete(id) : n.add(id);
+    onChange(n);
+  }
+
+  const filteredIds = filtered.map((p) => p.id);
+  const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.has(id));
+
+  function toggleSelectAll() {
+    const n = new Set(selectedIds);
+    if (allSelected) filteredIds.forEach((id) => n.delete(id));
+    else filteredIds.forEach((id) => n.add(id));
+    onChange(n);
+  }
+
   return (
     <div className="space-y-3">
       <div className="relative">
@@ -1079,6 +1150,15 @@ function FollowerPicker({
           className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-red-600 outline-none"
         />
       </div>
+      {!loading && filtered.length > 0 && (
+        <button type="button" onClick={toggleSelectAll}
+          className="flex items-center gap-2 text-xs text-zinc-300 hover:text-white transition px-1">
+          <span className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${allSelected ? 'border-red-500 bg-red-600' : 'border-zinc-600'}`}>
+            {allSelected && <CheckIcon className="w-2.5 h-2.5 text-white" />}
+          </span>
+          Select all {filtered.length ? `(${filtered.length})` : ''}
+        </button>
+      )}
       <div className="max-h-48 overflow-y-auto space-y-1">
         {loading ? (
           <p className="text-zinc-600 text-xs text-center py-4">Loading…</p>
@@ -1090,7 +1170,7 @@ function FollowerPicker({
           filtered.map((p) => {
             const checked = selectedIds.has(p.id);
             return (
-              <button key={p.id} type="button" onClick={() => onToggle(p.id)}
+              <button key={p.id} type="button" onClick={() => toggleOne(p.id)}
                 className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition ${checked ? 'bg-red-950/40 border border-red-800' : 'bg-zinc-950 border border-transparent hover:border-zinc-800'}`}>
                 <div className="w-8 h-8 rounded-full overflow-hidden shrink-0">
                   {p.avatar_url ? (
@@ -1322,11 +1402,7 @@ function UploadModal({ onClose, needsProfessional, onEnableProfessional, onPoste
               <p className="text-xs text-zinc-500">Select people from who you follow. Only they will see this post.</p>
               <FollowerPicker
                 selectedIds={selectedUserIds}
-                onToggle={(id) => setSelectedUserIds((prev) => {
-                  const n = new Set(prev);
-                  n.has(id) ? n.delete(id) : n.add(id);
-                  return n;
-                })}
+                onChange={setSelectedUserIds}
               />
               <div className="flex gap-2">
                 <button onClick={() => { setShowFollowerPicker(false); setShowPrivacy(true); }} className="flex-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 text-sm font-medium transition">Back</button>
