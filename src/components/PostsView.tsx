@@ -375,7 +375,7 @@ function ThoughtCard({
         </button>
         <div className="flex-1 min-w-0">
           <p className="text-white text-sm font-semibold truncate">{author?.display_name || 'User'}</p>
-          <p className="text-zinc-500 text-xs">{timeAgo(thought.created_at)} ago · only selected people</p>
+          <p className="text-zinc-500 text-xs">{timeAgo(thought.created_at)} ago</p>
         </div>
         {isOwn && (
           <button onClick={onDelete} className="text-zinc-600 hover:text-red-400 transition">
