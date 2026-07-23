@@ -384,15 +384,24 @@ function ThoughtCard({
         )}
       </div>
 
-      {/* Thought text */}
-      <div className="px-4 pb-3">
-        <p className="text-white text-sm leading-relaxed italic">"{thought.text}"</p>
-        {thought.song && (
-          <p className="mt-2 text-zinc-500 text-xs flex items-center gap-1.5">
+      {/* Thought text (optional) */}
+      {thought.text && (
+        <div className="px-4 pb-3">
+          <p className="text-white text-sm leading-relaxed italic">"{thought.text}"</p>
+          {thought.song && (
+            <p className="mt-2 text-zinc-500 text-xs flex items-center gap-1.5">
+              <Music className="w-3 h-3 text-red-400" /> {thought.song}
+            </p>
+          )}
+        </div>
+      )}
+      {!thought.text && thought.song && (
+        <div className="px-4 pb-3">
+          <p className="text-zinc-500 text-xs flex items-center gap-1.5">
             <Music className="w-3 h-3 text-red-400" /> {thought.song}
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {thought.image_url && (
         <div className="px-4 pb-3">
@@ -406,9 +415,6 @@ function ThoughtCard({
           <Heart className={`w-4 h-4 ${liked ? 'fill-red-500' : ''}`} />
           <span>{compactNum(thought.likes_count)}</span>
         </button>
-        <span className="text-zinc-700 text-xs ml-auto flex items-center gap-1">
-          <Users className="w-3 h-3" /> Private
-        </span>
       </div>
     </div>
   );
@@ -443,7 +449,8 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim() || !user) { setErr('Write something first'); return; }
+    if (!user) { setErr('You must be signed in'); return; }
+    if (!text.trim() && !imageFile) { setErr('Add a thought or a photo (or both)'); return; }
     if (selectedIds.size === 0) { setErr('Select at least one person to share with'); return; }
     setBusy(true);
 
@@ -461,7 +468,7 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
 
     const { error } = await supabase.from('thoughts').insert({
       author_id: user.id,
-      text: text.trim(),
+      text: text.trim() || null,
       song: song.trim() || null,
       image_url,
       visibility_user_ids: Array.from(selectedIds),
@@ -471,6 +478,8 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     onPosted();
   }
+
+  const canSubmit = !!(text.trim() || imageFile);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
@@ -484,9 +493,9 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
         <form onSubmit={submit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto scrollbar-thin">
           {err && <div className="text-sm text-red-300 bg-red-950/50 border border-red-800 rounded-lg px-3 py-2">{err}</div>}
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Your thought</label>
+            <label className="block text-xs text-zinc-400 mb-1">Your thought (optional)</label>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
-              placeholder="What's on your mind…"
+              placeholder="What's on your mind… (optional)"
               className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-red-600 outline-none resize-none" />
           </div>
           <div>
@@ -520,7 +529,7 @@ function ThoughtModal({ onClose, onPosted }: { onClose: () => void; onPosted: ()
             <p className="text-xs text-zinc-600 mb-2">Select specific followers — only they will see your thought</p>
             <FollowerPicker selectedIds={selectedIds} onChange={setSelectedIds} />
           </div>
-          <button type="submit" disabled={busy || uploadingImage || !text.trim()}
+          <button type="submit" disabled={busy || uploadingImage || !canSubmit}
             className="w-full rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-medium py-3 transition flex items-center justify-center gap-2">
             {(busy || uploadingImage) ? <><div className="w-4 h-4 border-2 border-white/40 border-t-transparent rounded-full animate-spin" /> Posting…</> : <><Send className="w-4 h-4" /> Post Thought</>}
           </button>
