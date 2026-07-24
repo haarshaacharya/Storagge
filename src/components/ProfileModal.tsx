@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Settings, Play, Plus, Trash2, Check, ArrowLeft, Camera, Sparkles, Shield, X, LogOut,
   Loader2, Instagram, Twitter, Youtube, Github, Linkedin, Globe, Link2, MessageCircle,
-  UserPlus, MoreVertical, Ban, Hash, Music, ExternalLink, Heart,
+  UserPlus, MoreVertical, Ban, Hash, Music, ExternalLink, Heart, Search,
 } from 'lucide-react';
 import { supabase, type Reel, type Profile, type SocialLink, type FavoriteReel, compactNum } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
@@ -252,12 +252,14 @@ export default function ProfileModal({
       const [{ data: pData }, { data: rData }, { data: fData }] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', viewingId).maybeSingle(),
         supabase.from('reels').select('*').eq('author_id', viewingId).eq('visibility', 'public').order('created_at', { ascending: false }),
-        supabase.from('follows').select('follower_id').eq('following_id', viewingId),
+        // people that viewingId FOLLOWS (i.e. "Joining" count) — must filter by follower_id,
+        // not following_id, or this ends up counting followers instead
+        supabase.from('follows').select('following_id').eq('follower_id', viewingId),
       ]);
       const p = pData as Profile | null;
       setTarget(p);
       setReels((rData as Reel[]) ?? []);
-      setJoining((fData as { follower_id: string }[])?.length ?? 0);
+      setJoining((fData as { following_id: string }[])?.length ?? 0);
       if (isOwn && p) {
         setDisplayName(p.display_name || '');
         setUsername(p.username || '');
@@ -354,14 +356,27 @@ export default function ProfileModal({
     if (!user || !target) return;
     const next = !isFollowing;
     setIsFollowing(next);
-    setJoining((j) => Math.max(0, j + (next ? 1 : -1)));
-    setTarget((t) => t ? { ...t, joins_count: Math.max(0, t.joins_count + (next ? 1 : -1)) } : t);
-    if (next) {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: target.id });
-      await supabase.rpc('increment_joins', { uid: target.id });
-    } else {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', target.id);
-      await supabase.rpc('decrement_joins', { uid: target.id });
+
+    // Insert/delete the follow row — this is the single source of truth.
+    // joins_count is kept accurate by a DB trigger on the `follows` table,
+    // so we deliberately do NOT call any increment/decrement RPC here —
+    // doing both was double-counting every follow/unfollow.
+    const { error } = next
+      ? await supabase.from('follows').insert({ follower_id: user.id, following_id: target.id })
+      : await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', target.id);
+
+    if (error) {
+      // the write failed — revert the optimistic UI state instead of
+      // leaving the button showing a state that never actually happened
+      setIsFollowing(!next);
+      return;
+    }
+
+    // Pull the real, trigger-maintained count instead of guessing with
+    // client-side math, so the number always matches the actual list.
+    const { data } = await supabase.from('profiles').select('joins_count').eq('id', target.id).maybeSingle();
+    if (data) {
+      setTarget((t) => (t ? { ...t, joins_count: (data as { joins_count: number }).joins_count } : t));
     }
   }
 
@@ -793,6 +808,13 @@ function FollowListPopup({
 }) {
   const [list, setList] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  const filteredList = list.filter((p) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (p.display_name || '').toLowerCase().includes(q) || (p.username || '').toLowerCase().includes(q);
+  });
 
   useEffect(() => {
     (async () => {
@@ -804,6 +826,8 @@ function FollowListPopup({
         if (ids.length) {
           const { data: ps } = await supabase.from('profiles').select('*').in('id', ids);
           setList((ps as Profile[]) ?? []);
+        } else {
+          setList([]);
         }
       } else {
         // People profileId follows
@@ -812,6 +836,8 @@ function FollowListPopup({
         if (ids.length) {
           const { data: ps } = await supabase.from('profiles').select('*').in('id', ids);
           setList((ps as Profile[]) ?? []);
+        } else {
+          setList([]);
         }
       }
       setLoading(false);
@@ -822,21 +848,34 @@ function FollowListPopup({
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-          <h3 className="font-bold text-white text-base">{mode === 'joins' ? 'Joins (Followers)' : 'Joining (Following)'}</h3>
+          <h3 className="font-bold text-white text-base">{mode === 'joins' ? 'Joins' : 'Joining'}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-white transition"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-5 pt-3 pb-2 border-b border-zinc-800">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or @username…"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-full pl-9 pr-3 py-2 text-sm text-white placeholder-zinc-600 focus:border-red-600 outline-none"
+            />
+          </div>
         </div>
         <div className="overflow-y-auto max-h-[60vh]">
           {loading ? (
             <div className="flex justify-center py-10">
               <Loader2 className="w-5 h-5 animate-spin text-red-500" />
             </div>
-          ) : list.length === 0 ? (
+          ) : filteredList.length === 0 ? (
             <p className="text-center text-zinc-500 text-sm py-10">
-              {mode === 'joins' ? 'No followers yet' : 'Not following anyone yet'}
+              {list.length === 0
+                ? (mode === 'joins' ? 'No followers yet' : 'Not following anyone yet')
+                : 'No matches'}
             </p>
           ) : (
             <div className="divide-y divide-zinc-800">
-              {list.map((p) => (
+              {filteredList.map((p) => (
                 <button key={p.id} onClick={() => onOpenProfile(p)}
                   className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-zinc-800/60 transition">
                   <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 border-2 border-zinc-700">
